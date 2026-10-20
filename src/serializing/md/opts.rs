@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::text_utils::linebreak;
 
-use super::constants::{LIST_OFFSET_BASE, MAX_LIST_NUMBER};
+use super::constants::MAX_LIST_NUMBER;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct EmphasisScope(u8);
@@ -19,6 +19,20 @@ impl EmphasisScope {
     pub const fn insert(mut self, other: Self) -> Self {
         self.0 |= other.0;
         self
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The markers that apply all of this scope's emphases at once.
+    pub const fn markers(self) -> &'static str {
+        match (self.contains(Self::BOLD), self.contains(Self::ITALIC)) {
+            (true, true) => "***",
+            (true, false) => "**",
+            (false, true) => "*",
+            (false, false) => "",
+        }
     }
 }
 
@@ -46,11 +60,13 @@ pub struct FormatOpts {
     pub table_cell: bool,
     /// Enables formatting rules for list item
     pub list_item: bool,
-    /// Inside a link's text, which cannot span a blank line or hold a
-    /// block marker: blocks are joined with spaces.
-    pub link_body: bool,
+    /// One line, as in a heading: blocks and line breaks become spaces.
+    pub single_line: bool,
     pub offset: usize,
     pub emphasis_scope: EmphasisScope,
+    /// Emphases holding blocks, which Markdown cannot span: each text block
+    /// inside applies them itself.
+    pub block_emphasis: EmphasisScope,
 }
 
 impl FormatOpts {
@@ -83,13 +99,12 @@ impl FormatOpts {
         self
     }
 
-    pub const fn link_body(mut self) -> Self {
-        self.link_body = true;
-        self
-    }
-
     pub const fn inline(mut self) -> Self {
         self.inline = true;
+        self
+    }
+    pub const fn single_line(mut self) -> Self {
+        self.single_line = true;
         self
     }
     pub const fn skip_md(mut self) -> Self {
@@ -99,6 +114,19 @@ impl FormatOpts {
 
     pub const fn emphasis_scope(mut self, scope: EmphasisScope) -> Self {
         self.emphasis_scope = self.emphasis_scope.insert(scope);
+        self
+    }
+
+    pub const fn block_emphasis(mut self, scope: EmphasisScope) -> Self {
+        self.block_emphasis = self.block_emphasis.insert(scope);
+        self
+    }
+
+    /// Options for the inline content of a text block that applies the
+    /// emphases spanning blocks around it.
+    pub const fn applying_block_emphasis(mut self) -> Self {
+        self.emphasis_scope = self.emphasis_scope.insert(self.block_emphasis);
+        self.block_emphasis = EmphasisScope(0);
         self
     }
 }
@@ -111,13 +139,16 @@ pub enum ListKind {
 }
 
 impl ListKind {
+    /// The width of the marker: content nested in an item is indented to it,
+    /// as more would turn an item that starts inline, or a line after a blank
+    /// one, into a code block.
     fn offset(&self) -> usize {
         match *self {
             ListKind::Ol(n) => {
                 let digits = if n == 0 { 1 } else { n.ilog10() + 1 };
-                (digits as usize + 2).max(LIST_OFFSET_BASE)
+                digits as usize + 2
             }
-            ListKind::Ul => LIST_OFFSET_BASE,
+            ListKind::Ul => 2,
         }
     }
 }

@@ -19,7 +19,7 @@ pub use node_data::{Element, NodeData};
 pub use node_ref::{Node, NodeRef};
 pub use serializing::SerializableNodeRef;
 pub(crate) use serializing::SerializeOp;
-pub(crate) use text_formatting::format_text;
+pub(crate) use text_formatting::{format_text, pre_text};
 
 /// Represents a Node ID.
 ///

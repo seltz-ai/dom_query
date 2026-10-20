@@ -308,12 +308,12 @@ $ cd hello
 1. Item 1
 2. Item 2
 3. Item 3
-    1. Item 3-1
-    2. Item 3-2
-    3. Item 3-3
-        1. Item 3-3-1
-        2. Item 3-3-2
-        3. Item 3-3-3";
+   1. Item 3-1
+   2. Item 3-2
+   3. Item 3-3
+      1. Item 3-3-1
+      2. Item 3-3-2
+      3. Item 3-3-3";
 
         html_2md_compare(contents, expected);
     }
@@ -345,12 +345,12 @@ $ cd hello
 - Item 1
 - Item 2
 - Item 3
-    - Item 3-1
-    - Item 3-2
-    - Item 3-3
-        - Item 3-3-1
-        - Item 3-3-2
-        - Item 3-3-3";
+  - Item 3-1
+  - Item 3-2
+  - Item 3-3
+    - Item 3-3-1
+    - Item 3-3-2
+    - Item 3-3-3";
 
         html_2md_compare(contents, expected);
     }
@@ -387,12 +387,12 @@ Another Paragraph";
     fn test_nested_list_in_item_with_paragraphs() {
         html_2md_compare(
             "<ul><li><p>a</p><ul><li><p>b</p></li><li><p>c</p></li></ul></li></ul>",
-            "- a\n\n    - b\n\n    - c",
+            "- a\n\n  - b\n\n  - c",
         );
         // a tight nested list gets no hard break and stays tight
         html_2md_compare(
             "<ul><li><p>a</p><ul><li>b</li><li>c</li></ul></li></ul>",
-            "- a\n\n    - b\n    - c",
+            "- a\n\n  - b\n  - c",
         );
     }
 
@@ -459,7 +459,7 @@ Another Paragraph";
         html_2md_compare("<ul><li><span>2</span>) x</li></ul>", "- 2\\) x");
         html_2md_compare(
             "<ul><li>a<ul><li><span>3</span>. x</li></ul></li></ul>",
-            "- a\n    - 3\\. x",
+            "- a\n  - 3\\. x",
         );
         // the item's own marker is already written: `1. 3. x` would nest a list
         html_2md_compare("<ol><li><span>3</span>. x</li></ol>", "1. 3\\. x");
@@ -494,11 +494,11 @@ Another Paragraph";
         // so it needs a blank line after the parent item's text
         html_2md_compare(
             "<ul><li>a<ol start=\"2\"><li>b</li></ol></li></ul>",
-            "- a\n\n    2. b",
+            "- a\n\n  2. b",
         );
         html_2md_compare(
             "<ul><li>a<ol><li value=\"3\">b</li></ol></li></ul>",
-            "- a\n\n    3. b",
+            "- a\n\n  3. b",
         );
     }
 
@@ -508,11 +508,11 @@ Another Paragraph";
         // parent item's text would make that text a heading
         html_2md_compare(
             "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
-            "- a\n\n    -\n    - b",
+            "- a\n\n  -\n  - b",
         );
         html_2md_compare(
             "<ul><li>a<ul><li><ul><li>c</li></ul></li></ul></li></ul>",
-            "- a\n\n    -\n        - c",
+            "- a\n\n  -\n    - c",
         );
     }
 
@@ -522,7 +522,7 @@ Another Paragraph";
         // column; at the outer item's column it parses as part of the outer item
         html_2md_compare(
             "<ul><li>a<ul><li><p>b</p><p>c</p></li></ul></li></ul>",
-            "- a\n    - b\n\n      c",
+            "- a\n  - b\n\n    c",
         );
     }
 
@@ -540,7 +540,7 @@ Another Paragraph";
         );
         html_2md_compare(
             "<ul><li>a<ul><li><p>b</p><pre><code>c\n</code></pre></li></ul></li></ul>",
-            "- a\n    - b\n\n      ```\n      c\n      ```",
+            "- a\n  - b\n\n    ```\n    c\n    ```",
         );
         // after inline text the fence starts a new line
         html_2md_compare(
@@ -691,14 +691,14 @@ Another Paragraph";
             "<ul><li><div><pre>x\ny</pre></div></li></ul>",
             "- ```\n  x\n  y\n  ```",
         );
-        // a wrapper holding a table or a rule is not unwrapped
+        // a wrapper holding a table or a rule is not unwrapped, but its blocks stay in the item
         html_2md_compare(
             "<ul><li><div><p>a</p><table><tr><td>t</td></tr></table></div></li></ul>",
-            "-\n\na\n\n\n|   |\n| - |\n| t |",
+            "- a\n\n  |   |\n  | - |\n  | t |",
         );
         html_2md_compare(
             "<ul><li><div><p>a</p><hr><p>b</p></div></li></ul>",
-            "-\n\na\n\n---\n\nb",
+            "- a\n\n  ---\n\n  b",
         );
     }
 
@@ -759,7 +759,7 @@ Another Paragraph";
         );
         html_2md_compare(
             "<ul><li>x<ul><li><p>n</p><!-- c --><p>m</p></li></ul></li></ul>",
-            "- x\n    - n\n\n      m",
+            "- x\n  - n\n\n    m",
         );
     }
 
@@ -979,11 +979,11 @@ Another Paragraph";
         // a hard break must not leave a blank line inside `[...]`, or in a table cell
         html_2md_compare(
             "<a href=\"/p\"><img src=\"a.jpg\">a<br><br>b</a>",
-            "[![](a.jpg)a<br><br>b](/p)",
+            "[![](a.jpg)a b](/p)",
         );
         html_2md_compare(
             "<table><tr><th>h</th></tr><tr><td><a href=\"/p\"><img src=\"a.jpg\"><h3>T</h3><p>B</p><br>x</a></td></tr></table>",
-            "| h |\n| - |\n| [![](a.jpg) T B<br>x](/p) |",
+            "| h |\n| - |\n| [![](a.jpg) T B x](/p) |",
         );
     }
 
@@ -1266,7 +1266,7 @@ The wind is passing by.
     }
 
     #[test]
-    fn test_table_skip() {
+    fn test_table_short_row_padded() {
         let contents = "<table>
     <tr>
         <td>R 1, <i>C 1</i></td>
@@ -1278,8 +1278,7 @@ The wind is passing by.
         <td>R 2, <i>C 2</i></td>
     </tr>
 </table>";
-        let expected = "R 1, *C 1* R 1, *C 2* R 1, *C 3*  
-R 2, *C 1* R 2, *C 2*";
+        let expected = "|   |   |   |\n| - | - | - |\n| R 1, *C 1* | R 1, *C 2* | R 1, *C 3* |\n| R 2, *C 1* | R 2, *C 2* |  |";
         html_2md_compare(contents, expected);
     }
 
@@ -1468,7 +1467,7 @@ R 2, *C 1* R 2, *C 2*";
         // a nested list that ends its item doesn't make the parent list loose
         html_2md_compare(
             "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>d",
-            "- a\n    - b\n- c\n\nd",
+            "- a\n  - b\n- c\n\nd",
         );
     }
     #[test]
@@ -1619,5 +1618,547 @@ fn main() {
 
         html_2md_compare("<p><b>a</b><em>b</em></p>", "**a***b*");
         html_2md_compare("<p><b>a</b> <em>b</em></p>", "**a** *b*");
+    }
+
+    // ---- seltz cases ----
+    #[test]
+    fn ours_test_table_short_row_padded() {
+        let contents = "<table>
+    <tr>
+        <td>R 1, <i>C 1</i></td>
+        <td>R 1, <i>C 2</i></td>
+        <td>R 1, <i>C 3</i></td>
+    </tr>
+    <tr>
+        <td>R 2, <i>C 1</i></td>
+        <td>R 2, <i>C 2</i></td>
+    </tr>
+</table>";
+        let expected = "|   |   |   |\n| - | - | - |\n| R 1, *C 1* | R 1, *C 2* | R 1, *C 3* |\n| R 2, *C 1* | R 2, *C 2* |  |";
+        html_2md_compare(contents, expected);
+    }
+
+    #[test]
+    fn ours_test_emphasis_whitespace_moves_outside() {
+        html_2md_compare(
+            "<p>effort. <em>Test it out </em>– Never</p>",
+            "effort. *Test it out* – Never",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_edge_punctuation_moves_out_only_where_needed() {
+        html_2md_compare(
+            "<p>a <b>retention,</b> b c<b>(x</b>y d<b>Note:</b>e</p>",
+            "a **retention,** b c(**x**y d**Note**:e",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_edge_whitespace_and_punctuation() {
+        html_2md_compare(
+            "<p><strong>Does the above sound like you? – </strong>For your</p>",
+            "**Does the above sound like you? –** For your",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_of_escaped_character_only() {
+        html_2md_compare(
+            "<p>diapers, or furniture<strong>*</strong></p>",
+            "diapers, or furniture\\*",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_adjacent_same_kind_merge() {
+        html_2md_compare(
+            "<p><b>a</b><b>b</b> <i>c</i><i>d</i> <b>e</b><i>f</i></p>",
+            "**ab** *cd* **e***f*",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_adjacent_different_kind_not_merged() {
+        html_2md_compare(
+            "<p><em>to him. </em><strong><sup>39</sup></strong><em>She had</em></p>",
+            "*to him.* **39***She had*",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_repeated_nesting_merges_level_by_level() {
+        html_2md_compare(
+            "<p><em><strong>4+ stars H</strong></em><em><strong>otels</strong></em></p>",
+            "***4+ stars H***_**otels**_",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_nested_same_kind_written_once() {
+        html_2md_compare(
+            "<p><strong><strong><em>I<strong><em><strong>TV1 / STV, </strong></em></strong>8.30<strong><em><strong>pm stream</strong></em></strong></em></strong></strong></p>",
+            "***ITV1 / STV, 8.30pm stream***",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_across_blocks_applies_per_block() {
+        html_2md_compare(
+            "<strong><h2>Did you know?</h2><p><em>Toxic</em> markers</p></strong>",
+            "## **Did you know?**\n\n***Toxic* markers**",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_across_list_items() {
+        html_2md_compare(
+            "<b><ul><li>first</li><li>second <i>it</i></li></ul></b>",
+            "- **first**\n- **second *it***",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_hard_break_kept_after_marker() {
+        html_2md_compare(
+            "<p>price tag.</p><p><strong>Industry Context<br></strong></p><p>Cash</p>",
+            "price tag.\n\n**Industry Context**  \n\nCash",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_around_code_span_and_link() {
+        html_2md_compare(
+            "<p><em>Inherits from <code>XRLayer</code>.</em> x <b>see <a href=\"/x\">link</a>.</b> y</p>",
+            "*Inherits from `XRLayer`.* x **see [link](/x).** y",
+        );
+    }
+
+    #[test]
+    fn ours_test_no_emphasis_inside_code_span() {
+        html_2md_compare(
+            "<p>The <code><strong>reportError</strong>()</code> method</p>",
+            "The `reportError()` method",
+        );
+    }
+
+    #[test]
+    fn ours_test_empty_code_span_skipped() {
+        html_2md_compare("<p>Contact: <code></code> TG</p>", "Contact: TG");
+    }
+
+    #[test]
+    fn ours_test_link_without_href_keeps_spaces() {
+        html_2md_compare(
+            "<p>Copyright © <a>2026 </a>Lead2Goals. See<a> the docs</a>, then <a><b>go </b></a>on</p>",
+            "Copyright © 2026 Lead2Goals. See the docs, then **go** on",
+        );
+    }
+
+    #[test]
+    fn ours_test_link_without_href_keeps_blocks() {
+        html_2md_compare(
+            "<a><div>Facebook</div></a><a><div><i></i></div><div>Twitter</div></a>",
+            "Facebook\n\nTwitter",
+        );
+    }
+
+    #[test]
+    fn ours_test_link_trailing_space_after_destination() {
+        html_2md_compare(
+            "<p>Copyright © <a href=\"/x\">2026 </a>Lead2Goals.</p>",
+            "Copyright © [2026 ](/x)Lead2Goals.",
+        );
+    }
+
+    #[test]
+    fn ours_test_destination_with_spaces_in_angle_brackets() {
+        html_2md_compare(
+            "<p><a href=\"/a b\">x</a> <img src=\"background-image: url('https://x.net/a.jpg');\" alt=\"\"></p>",
+            "[x](</a b>) ![](<background-image: url('https://x.net/a.jpg');>)",
+        );
+    }
+
+    #[test]
+    fn ours_test_nested_list_without_text_in_parent_item() {
+        html_2md_compare(
+            "<ul><li><ul><li>child</li><li>child2</li></ul></li><li>next</li></ul>",
+            "-\n  - child\n  - child2\n- next",
+        );
+    }
+
+    #[test]
+    fn ours_test_nested_lists_indent_to_content_column() {
+        html_2md_compare(
+            "<ol><li><p>CONNECT</p><ul><li><p>SYDNEY</p><ul><li>EMAIL</li></ul></li></ul></li></ol>",
+            "1. CONNECT\n\n   - SYDNEY\n\n     - EMAIL",
+        );
+    }
+
+    #[test]
+    fn ours_test_list_item_inline_then_block() {
+        html_2md_compare(
+            "<ol><li><span>01</span><h3>Focus, always</h3></li><li><span>02</span><h3>Design</h3></li></ol>",
+            "1. 01\n   ### Focus, always\n2. 02\n   ### Design",
+        );
+    }
+
+    #[test]
+    fn ours_test_text_after_list_is_a_new_paragraph() {
+        html_2md_compare(
+            "<div><ul><li>a</li></ul>tail text</div>",
+            "- a\n\ntail text",
+        );
+    }
+
+    #[test]
+    fn ours_test_definition_list_and_orphan_item() {
+        html_2md_compare(
+            "<dl><dt>Series:</dt><dd><a>Choir</a></dd><li>Event Category: Facility</li></dl>",
+            "Series:\n\nChoir\n\n- Event Category: Facility",
+        );
+    }
+
+    #[test]
+    fn ours_test_html5_blocks_are_separated() {
+        html_2md_compare(
+            "<header>Top</header><main>Body</main><nav>Links</nav><footer>Bottom</footer>",
+            "Top\n\nBody\n\nLinks\n\nBottom",
+        );
+    }
+
+    #[test]
+    fn ours_test_table_row_headers_are_cells() {
+        html_2md_compare(
+            "<table><tr><th>Weight</th><td>1 lbs</td></tr><tr><th>Dimensions</th><td>8.75 in</td></tr></table>",
+            "|   |   |\n| - | - |\n| Weight | 1 lbs |\n| Dimensions | 8.75 in |",
+        );
+    }
+
+    #[test]
+    fn ours_test_table_caption_before_table() {
+        html_2md_compare(
+            "<table><caption><strong>Comparison</strong></caption><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+            "**Comparison**\n\n| A | B |\n| - | - |\n| 1 | 2 |",
+        );
+    }
+
+    #[test]
+    fn ours_test_table_with_unequal_rows_padded() {
+        html_2md_compare(
+            "<table><tr><td>550</td><td>390</td></tr><tr><td>x</td></tr></table><span>You may need</span>",
+            "|   |   |\n| - | - |\n| 550 | 390 |\n| x |  |\n\nYou may need",
+        );
+    }
+
+    #[test]
+    fn ours_test_table_cell_blocks_inline() {
+        html_2md_compare(
+            "<table><tr><td><a><h3>2018 - Ballagás</h3></a></td><td><blockquote>A támogatók</blockquote></td></tr><tr><td><p>p1</p><p>p2</p></td><td><ul><li>a</li><li>b</li></ul></td></tr></table>",
+            "|   |   |\n| - | - |\n| 2018 - Ballagás | A támogatók |\n| p1<br>p2 | + a<br>+ b |",
+        );
+    }
+
+    #[test]
+    fn ours_test_line_start_block_syntax_escaped() {
+        html_2md_compare(
+            "<p>valeurs U sont<br>- fenêtre simple</p><p>-5 degrees</p><p>==========</p><p>~~~~~~~~ text</p><p><em>- Friedrich Schiller</em></p>",
+            "valeurs U sont  \n\\- fenêtre simple\n\n\\-5 degrees\n\n\\==========\n\n\\~\\~\\~\\~\\~\\~\\~\\~ text\n\n*\\- Friedrich Schiller*",
+        );
+    }
+
+    #[test]
+    fn ours_test_entities_and_backslashes_escaped() {
+        html_2md_compare(
+            "<p>lo sceglier&amp;ograve; di sicuro, AT&amp;T &amp; co, \\\"Kate\\\" and C:\\path</p>",
+            "lo sceglier\\&ograve; di sicuro, AT&T & co, \\\\\"Kate\\\\\" and C:\\\\path",
+        );
+    }
+
+    #[test]
+    fn ours_test_multibyte_whitespace_trimmed() {
+        html_2md_compare(
+            "<p>a　</p><pre>b　</pre>",
+            "a\u{3000}\n\n```\nb\u{3000}\n```",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_nested_edge_punctuation_before_letter() {
+        html_2md_compare(
+            "<p><b><i>Note:</i></b>e and <b><i>Note:</i></b> f</p>",
+            "***Note***:e and ***Note:*** f",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_leading_punctuation_kept_after_space() {
+        html_2md_compare(
+            "<p><strong>[v1]</strong> and x<strong>[v2]</strong>y</p>",
+            "**\\[v1\\]** and x\\[**v2**\\]y",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_back_to_back_different_kinds() {
+        html_2md_compare(
+            "<p><strong>Was <em>Monster Lai</em></strong><em>r</em>?</p>",
+            "**Was *Monster Lai***_r_?",
+        );
+        // `_` cannot close before a letter: that emphasis keeps its text only
+        html_2md_compare(
+            "<p><strong>Was <em>Lai</em></strong><em>r</em>s</p>",
+            "**Was *Lai***rs",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_next_to_zero_width_characters() {
+        // A zero-width character is neither whitespace nor punctuation
+        html_2md_compare(
+            "<p>x&#8203;<i>–Nolan</i> and <b>«Οι».</b>&#8205;</p>",
+            "x\u{200b}–*Nolan* and **«Οι**».\u{200d}",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_holds_hard_breaks() {
+        html_2md_compare(
+            "<p><strong>Hours<br>Mon - Fri</strong></p><p>Before <b><br>after:</b> x</p>",
+            "**Hours  \nMon - Fri**\n\nBefore  \n**after:** x",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_after_emphasis_starting_with_space() {
+        html_2md_compare(
+            "<p><strong>1905:</strong><em> May Sutton</em> and <b>«a»</b>، و</p>",
+            "**1905:** *May Sutton* and **«a»**، و",
+        );
+    }
+
+    #[test]
+    fn ours_test_heading_breaks_and_blocks_become_spaces() {
+        html_2md_compare(
+            "<h2>Let Us Fund<br>Your Next Project</h2><h3><p>Para</p><div>div</div></h3>",
+            "## Let Us Fund Your Next Project\n\n### Para div",
+        );
+    }
+
+    #[test]
+    fn ours_test_title_skipped() {
+        html_2md_compare("<div><title>Hidden</title><p>Body</p></div>", "Body");
+    }
+
+    #[test]
+    fn ours_test_table_spans_laid_out_on_grid() {
+        html_2md_compare(
+            "<table><tr><td colspan=\"2\">Wide</td><td rowspan=\"2\">R</td></tr><tr><td>a</td><td>b</td></tr></table>",
+            "|   |   |   |\n| - | - | - |\n| Wide |  | R |\n| a | b |  |",
+        );
+    }
+
+    #[test]
+    fn ours_test_one_blank_line_before_table_and_fence() {
+        html_2md_compare(
+            "<p>before</p><table><tr><th>A</th></tr><tr><td>1</td></tr></table><p>code:</p><pre>x</pre>",
+            "before\n\n| A |\n| - |\n| 1 |\n\ncode:\n\n```\nx\n```",
+        );
+    }
+
+    #[test]
+    fn ours_test_table_header_only() {
+        html_2md_compare(
+            "<table><tr><th>A</th><th>B</th></tr></table>",
+            "| A | B |\n| - | - |",
+        );
+    }
+
+    #[test]
+    fn ours_test_list_inside_list_belongs_to_item_before() {
+        html_2md_compare(
+            "<ul><li>A</li><ul><li>B</li><li>C</li></ul><li>D</li></ul>",
+            "- A\n  - B\n  - C\n- D",
+        );
+    }
+
+    #[test]
+    fn ours_test_items_wrapped_inside_list() {
+        html_2md_compare(
+            "<ul><div><li>a</li><li>b</li></div><a><li>c</li></a></ul>",
+            "- a\n- b\n- c",
+        );
+    }
+
+    #[test]
+    fn ours_test_text_inside_list_set_apart() {
+        html_2md_compare(
+            "<ul><li>Job</li>Apply for job</ul><p>after</p>",
+            "- Job\n\nApply for job\n\nafter",
+        );
+    }
+
+    #[test]
+    fn ours_test_inline_content_inside_list_stays_together() {
+        html_2md_compare(
+            "<ul><p>TOPICS:</p><a>Amy Acton</a><a>Vivek</a><li>x</li><b>a:</b>c</ul>",
+            "TOPICS:\n\nAmy ActonVivek\n\n- x\n\n**a**:c",
+        );
+    }
+
+    #[test]
+    fn ours_test_heading_items_become_words() {
+        html_2md_compare(
+            "<h6><ul><li><a>Career</a></li><span>|</span><li><a>Contact us</a></li></ul></h6>",
+            "###### Career \\| Contact us",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_merge_keeps_inner_run_valid() {
+        html_2md_compare(
+            "<p>needed: <em><strong>Luke 10:42 …</strong></em><em>but few.</em></p>",
+            "needed: ***Luke 10:42*** …_but few._",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_spanning_blocks_applies_to_inline_runs() {
+        html_2md_compare(
+            "<b><div>intro <i>it</i> text<p>para</p>tail</div></b>",
+            "**intro *it* text**\n\n**para**\n\n**tail**",
+        );
+        html_2md_compare("<b><h2><p>x</p></h2></b>", "## **x**");
+    }
+
+    #[test]
+    fn ours_test_emphasis_with_breaks_at_edges_in_cell() {
+        html_2md_compare(
+            "<table><tr><td><strong>Chest <br></strong></td><td><b><br>Annual<br>Report</b></td></tr></table>",
+            "|   |   |\n| - | - |\n| **Chest** | <br>**Annual  <br>Report** |",
+        );
+    }
+
+    #[test]
+    fn ours_test_svg_skipped() {
+        html_2md_compare(
+            "<div><svg><text>0204060</text></svg><p>after</p></div>",
+            "after",
+        );
+    }
+
+    #[test]
+    fn ours_test_pre_breaks_and_blocks_kept() {
+        html_2md_compare(
+            "<pre><p>line one.</p><p>line two</p>tail<br>• a</pre>",
+            "```\nline one.\nline two\ntail\n• a\n```",
+        );
+    }
+
+    #[test]
+    fn ours_test_thematic_break_in_item() {
+        html_2md_compare(
+            "<ul><li>x</li><li><hr></li><li>y</li></ul>",
+            "- x\n-\n  ---\n- y",
+        );
+    }
+
+    #[test]
+    fn ours_test_list_item_blocks_in_link_without_href() {
+        // the paragraph would otherwise leave the item, and the nested list
+        // after it would become a code block
+        html_2md_compare(
+            "<ul><li><a><p>a</p></a><ul><li><a><p>b</p></a></li></ul></li></ul>",
+            "- a\n\n  - b",
+        );
+    }
+
+    #[test]
+    fn ours_test_punctuation_emphasis_continues_the_one_before() {
+        html_2md_compare(
+            "<p><a><b>Data Lineage</b></a><b>:</b> x</p>",
+            "**Data Lineage:** x",
+        );
+        // moved out before a letter, where the closing marker would not close
+        html_2md_compare("<p><b>a</b><b>:</b>x</p>", "**a**:x");
+    }
+
+    #[test]
+    fn ours_test_emphasis_not_merged_into_longer_run() {
+        // merging `**` into a closing `***` leaves runs CommonMark pairs wrongly
+        html_2md_compare(
+            "<p><b><em>a </em></b><a><b><em>b</em></b></a><b><em> c</em></b></p>",
+            "***a*** ***b*** ***c***",
+        );
+    }
+
+    #[test]
+    fn ours_test_emphasis_punctuation_moved_out_across_link_without_href() {
+        html_2md_compare("<p><a><em>x (y)</em></a><a>Follow</a></p>", "*x (y*)Follow");
+    }
+
+    #[test]
+    fn ours_test_list_item_inline_wrapper_and_empty_blocks() {
+        // an empty block does not take the item's first line
+        html_2md_compare(
+            "<ul><li><figure> </figure>a</li><li>b</li></ul>",
+            "- a\n- b",
+        );
+        // blocks inside an inline element stay in the item
+        html_2md_compare(
+            "<ul><li><label><p>a</p><span>b</span></label></li><li>c</li></ul>",
+            "- a\n\n  b\n- c",
+        );
+        // a list opening the item follows its marker with no blank line
+        html_2md_compare(
+            "<ul><li><div><ol start=\"3\"><li>c</li></ol></div></li></ul>",
+            "- 3. c",
+        );
+    }
+
+    #[test]
+    fn ours_test_words_kept_apart_at_line_breaks_and_cells() {
+        // a line break opening an emphasis in a heading
+        html_2md_compare(
+            "<h2>Round 2<strong><br>Navigating</strong></h2>",
+            "## Round 2 **Navigating**",
+        );
+        // the cells of a table holding a table, which is not written as a table
+        html_2md_compare(
+            "<table><tr><td>a</td><td>b</td></tr><tr><td><table><tr><td>c</td></tr></table></td></tr></table>",
+            "a b  \n\n|   |\n| - |\n| c |",
+        );
+    }
+
+    #[test]
+    fn ours_test_line_start_escaped_after_whitespace() {
+        // whitespace before the text is trimmed, leaving it at the line start
+        html_2md_compare(
+            "<ol><li>a</li>\n <span>&gt;</span>\n <li>b</li></ol>",
+            "1. a\n\n\\>\n\n2. b",
+        );
+    }
+
+    #[test]
+    fn ours_test_review_fixes() {
+        // punctuation-only emphasis after digits does not form a list marker
+        html_2md_compare("<p>1<em>.</em></p>", "1\\.");
+        html_2md_compare("<p>1<b>)</b> a</p>", "1\\) a");
+        // emphasis around a code span or link needs room for its markers
+        html_2md_compare("<p>a<b><code>c</code></b> d</p>", "a`c` d");
+        html_2md_compare("<p><b>x<code>a</code></b>y</p>", "x`a`y");
+        html_2md_compare("<p>a <b><code>c</code></b> d</p>", "a **`c`** d");
+        // a nested emphasis of the same kind still moves punctuation out
+        html_2md_compare("<p><i>Note <b>x.</b><i>y</i></i>z</p>", "*Note **x**.y*z");
+        // emphasis around blocks keeps them in the item
+        html_2md_compare(
+            "<ul><li><b><p>a</p><p>b</p></b></li></ul>",
+            "- **a**\n\n  **b**",
+        );
+        // a code block in a cell keeps the table one row per line
+        html_2md_compare(
+            "<table><tr><td>x<pre>a\nb</pre></td></tr></table>",
+            "|   |\n| - |\n| x<br>`a`<br>`b` |",
+        );
     }
 }
