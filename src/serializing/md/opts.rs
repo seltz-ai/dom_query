@@ -10,6 +10,7 @@ pub struct EmphasisScope(u8);
 impl EmphasisScope {
     pub const BOLD: Self = Self(1 << 0);
     pub const ITALIC: Self = Self(1 << 1);
+    pub const STRIKE: Self = Self(1 << 2);
 
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
@@ -25,7 +26,8 @@ impl EmphasisScope {
         self.0 == 0
     }
 
-    /// The markers that apply all of this scope's emphases at once.
+    /// The markers that apply all of this scope's emphases at once;
+    /// strikethrough is not applied across blocks.
     pub const fn markers(self) -> &'static str {
         match (self.contains(Self::BOLD), self.contains(Self::ITALIC)) {
             (true, true) => "***",
@@ -41,6 +43,7 @@ impl From<&str> for EmphasisScope {
         match marker {
             // TODO: support "_"
             "*" => Self::ITALIC,
+            "~~" => Self::STRIKE,
             _ => Self::BOLD,
         }
     }
@@ -62,6 +65,8 @@ pub struct FormatOpts {
     pub list_item: bool,
     /// One line, as in a heading: blocks and line breaks become spaces.
     pub single_line: bool,
+    /// Inside a link's text, where a nested link is written as its text.
+    pub in_link: bool,
     pub offset: usize,
     pub emphasis_scope: EmphasisScope,
     /// Emphases holding blocks, which Markdown cannot span: each text block
@@ -105,6 +110,10 @@ impl FormatOpts {
     }
     pub const fn single_line(mut self) -> Self {
         self.single_line = true;
+        self
+    }
+    pub const fn in_link(mut self) -> Self {
+        self.in_link = true;
         self
     }
     pub const fn skip_md(mut self) -> Self {
@@ -158,6 +167,9 @@ pub struct ListContext {
     pub opts: FormatOpts,
     pub kind: ListKind,
     list_indent: usize,
+    /// Whether this list writes the other marker, `+` for `-` or `)` for `.`,
+    /// as a list right after a list with the same marker would continue it.
+    other_marker: bool,
 }
 
 impl ListContext {
@@ -169,7 +181,13 @@ impl ListContext {
             opts: list_opts,
             kind,
             list_indent: opts.offset,
+            other_marker: false,
         }
+    }
+
+    pub const fn other_marker(mut self, other: bool) -> Self {
+        self.other_marker = other;
+        self
     }
 
     pub fn list_indent(&self) -> String {
@@ -181,12 +199,17 @@ impl ListContext {
     }
 
     const fn ul_prefix(&self) -> &'static str {
-        if self.opts.table_cell { "+ " } else { "- " }
+        if self.opts.table_cell == self.other_marker {
+            "- "
+        } else {
+            "+ "
+        }
     }
 
     pub fn prefix(&self) -> Cow<'static, str> {
         match self.kind {
             ListKind::Ul => Cow::Borrowed(self.ul_prefix()),
+            ListKind::Ol(n) if self.other_marker => Cow::Owned(format!("{n}) ")),
             ListKind::Ol(n) => Cow::Owned(format!("{n}. ")),
         }
     }

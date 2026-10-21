@@ -1,6 +1,5 @@
 use memchr::memchr3;
 
-use super::constants::{ALWAYS_ESCAPED, LINE_START_ESCAPED};
 use super::opts::FormatOpts;
 
 #[allow(clippy::cast_possible_truncation)]
@@ -30,11 +29,25 @@ pub(super) fn push_normalized_text(text: &mut String, new_text: &str, f_opts: Fo
         // only the first word of a text node can continue a Markdown line;
         // spaces before it may be trimmed later, and a line may start with some
         let line = text.trim_end_matches(' ');
-        let is_line_start = line.is_empty() || line.ends_with('\n') || f_opts.list_item;
-        push_escaped_chunk(&mut result, first, escape, is_line_start);
-        for word in iter {
-            result.push(' ');
-            push_escaped_chunk(&mut result, word, escape, false);
+        // a heading's or link's text is on its marker's line, past any line start
+        let is_line_start =
+            !f_opts.single_line && (line.is_empty() || line.ends_with('\n') || f_opts.list_item);
+        let mut word = Some(first);
+        let mut around = Around {
+            line_start: is_line_start,
+            in_link: f_opts.in_link,
+            prev: result.chars().last().or_else(|| text.chars().last()),
+            space_after: true,
+        };
+        while let Some(w) = word {
+            word = iter.next();
+            around.space_after = word.is_some() || push_end_whitespace;
+            push_escaped_chunk(&mut result, w, escape, around);
+            if word.is_some() {
+                result.push(' ');
+            }
+            around.line_start = false;
+            around.prev = Some(' ');
         }
     }
 
@@ -81,36 +94,68 @@ fn is_ordered_list_marker(chunk: &str) -> bool {
     !stem.is_empty() && stem.as_bytes().iter().all(u8::is_ascii_digit)
 }
 
-pub(super) fn push_escaped_chunk(text: &mut String, chunk: &str, escape: bool, line_start: bool) {
+/// What escaping a word depends on around it.
+#[derive(Clone, Copy)]
+pub(super) struct Around {
+    /// Whether the word starts a Markdown line.
+    pub line_start: bool,
+    /// Whether it is in a link's text, where brackets must balance.
+    pub in_link: bool,
+    /// The character before it.
+    pub prev: Option<char>,
+    /// Whether whitespace follows it.
+    pub space_after: bool,
+}
+
+/// Writes a word, escaping what Markdown would read in it, and only that: an
+/// intraword `_` cannot delimit emphasis, an unpaired `[` makes no link, `<`
+/// opens a tag only before a letter, `/`, `!` or `?`, `|` matters only in a
+/// table, whose cells escape it, and a line-start `-`, `+` or `#` only as a
+/// marker of its own.
+pub(super) fn push_escaped_chunk(text: &mut String, chunk: &str, escape: bool, around: Around) {
     if !escape {
         text.push_str(chunk);
         return;
     }
 
+    let line_start = around.line_start;
     let list_marker = line_start && is_ordered_list_marker(chunk);
     let bytes = chunk.as_bytes();
     // a first word of only `=` could underline the previous line into a setext heading
     let setext_underline = line_start && bytes.iter().all(|&b| b == b'=');
+    // a first word like `---`, `:--` or `|-|` could be a rule, a setext
+    // underline or a table's delimiter row
+    let rule_like = line_start && bytes.iter().all(|b| b"-:|".contains(b)) && bytes.contains(&b'-');
     let mut last = 0;
 
     text.reserve(chunk.len());
 
     for (i, &b) in bytes.iter().enumerate() {
-        let escaped = if ALWAYS_ESCAPED.contains(&b) {
-            true
-        } else if LINE_START_ESCAPED.contains(&b) {
-            line_start && i == 0
-        } else if b == b'!' {
-            bytes.get(i + 1) == Some(&b'[')
-        } else if b == b'.' || b == b')' {
-            list_marker
-        } else if b == b'=' {
-            setext_underline && i == 0
-        } else if b == b'&' {
+        // only for ASCII bytes, which `i + 1` follows on a character boundary
+        let next = || chunk[i + 1..].chars().next();
+        let escaped = match b {
+            b'\\' | b'`' | b'*' | b'~' | b']' => true,
+            b'_' => {
+                let prev = chunk[..i].chars().next_back().or(around.prev);
+                let word_char =
+                    |c: Option<char>| c.is_some_and(|c| !is_whitespace_or_punctuation(c));
+                !(word_char(prev) && word_char(next()))
+            }
+            b'[' => around.in_link,
+            b'<' => match next() {
+                Some(c) => c.is_ascii_alphabetic() || matches!(c, '/' | '!' | '?'),
+                None => !around.space_after,
+            },
+            b'>' => line_start && i == 0,
+            b'#' => line_start && i == 0 && bytes.len() <= 6 && bytes.iter().all(|&b| b == b'#'),
+            b'-' | b':' | b'|' if rule_like => i == 0,
+            b'-' | b'+' => line_start && bytes.len() == 1,
+            b'!' => next() == Some('['),
+            b'.' | b')' => list_marker,
+            b'=' => setext_underline && i == 0,
             // `&ograve;` in the text would otherwise render as `ò`
-            starts_entity(&chunk[i + 1..])
-        } else {
-            false
+            b'&' => starts_entity(&chunk[i + 1..]),
+            _ => false,
         };
 
         if escaped {
@@ -160,13 +205,22 @@ pub(super) fn add_linebreaks(text: &mut String, linebreak: &str, end: &str) {
     }
 }
 
-/// Keep only the first whitespace‑delimited token and a conservative set of characters.
+/// The first whitespace-delimited token of a code language, written so a fence's
+/// info string reads it back: with no backtick or control character, which it
+/// cannot hold, and with the backslashes and entities it would decode escaped.
 pub(super) fn sanitize_attr_value(raw: &str) -> String {
-    let token = raw.split_ascii_whitespace().next().unwrap_or("");
-    token
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '+' | '.' | '#'))
-        .collect()
+    let token = raw.split_whitespace().next().unwrap_or("");
+    let mut out = String::with_capacity(token.len());
+    for (i, c) in token.char_indices() {
+        if c == '`' || c.is_control() {
+            continue;
+        }
+        if c == '\\' || (c == '&' && starts_entity(&token[i + 1..])) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// An emphasis whose closing marker ends the output.
@@ -198,18 +252,7 @@ pub(super) fn push_emphasis(acc: &mut String, inner: &str, marker: &str) -> Opti
     let start = content.as_ptr() as usize - inner.as_ptr() as usize;
     let lead = &inner[..start];
     let trail = &inner[start + content.len()..];
-    // emphasis holds hard line breaks (`  \n`) within a paragraph; any other
-    // break, or a blank line at an edge, means it spans blocks
-    let hard_breaks_only = content
-        .split('\n')
-        .rev()
-        .skip(1)
-        .all(|line| line.ends_with("  ") && !line.trim().is_empty());
-    if !hard_breaks_only
-        || content.contains("```")
-        || lead.contains("\n\n")
-        || trail.contains("\n\n")
-    {
+    if spans_blocks(content, lead, trail) {
         let raw = if acc.is_empty() || acc.ends_with("\n\n") {
             inner.trim_start_matches(['\n', ' '])
         } else {
@@ -229,11 +272,15 @@ pub(super) fn push_emphasis(acc: &mut String, inner: &str, marker: &str) -> Opti
         acc.push(' ');
     }
     let code_or_link = has_unescaped(content, '`') || content.contains("](");
+    if let Some(punct) = without_inner_markers(content).filter(|_| !code_or_link) {
+        return push_punctuation_emphasis(acc, &punct, marker, lead.is_empty(), trail.is_empty());
+    }
     let (head, body, tail) = split_edge_punctuation(content);
     if body.is_empty() && !code_or_link {
-        return push_punctuation_emphasis(acc, head, marker, lead.is_empty(), trail.is_empty());
+        // punctuation joined by a zero-width joiner, as in an emoji sequence
+        return push_punctuation_emphasis(acc, content, marker, lead.is_empty(), trail.is_empty());
     }
-    let merged = try_trim_prev_emphasis_marker(acc, marker);
+    let merged = !opens_on_punctuation(content) && try_trim_prev_emphasis_marker(acc, marker);
     if merged && content.starts_with('[') {
         // emphasis merged into the one before it adds no marker before the link
         escape_trailing_bang(acc);
@@ -245,18 +292,21 @@ pub(super) fn push_emphasis(acc: &mut String, inner: &str, marker: &str) -> Opti
         .chars()
         .next_back()
         .is_none_or(is_whitespace_or_punctuation);
+    // after a letter, an opening marker cannot precede punctuation it cannot
+    // move out: a run of the other kind (`~` against `*` or `_`), or that of a
+    // code span or link; such content is not emphasized
+    let unmovable = starts_other_kind(content, marker)
+        || (code_or_link && content.starts_with(is_whitespace_or_punctuation));
+    if !merged && !after_space_or_punct && unmovable {
+        acc.push_str(content);
+        if !trail.is_empty() {
+            acc.push(' ');
+        }
+        return None;
+    }
     let mut closed;
     if code_or_link {
-        // a code span or link cannot move its edge punctuation out: without
-        // room for the opening marker it is not emphasized, and the caller
-        // removes the markers if a letter follows the closing one
-        if !merged && !after_space_or_punct && content.starts_with(is_whitespace_or_punctuation) {
-            acc.push_str(content);
-            if !trail.is_empty() {
-                acc.push(' ');
-            }
-            return None;
-        }
+        // the caller removes the markers if a letter follows the closing one
         let open = acc.len();
         if !merged {
             acc.push_str(marker);
@@ -304,9 +354,22 @@ pub(super) fn push_emphasis(acc: &mut String, inner: &str, marker: &str) -> Opti
     closed
 }
 
-/// Writes emphasized punctuation, which has nothing to emphasize by itself,
-/// unless it continues an emphasis ending right before it, as in
-/// `<b>a</b><b>:</b>`.
+/// Whether emphasized content spans blocks: emphasis holds hard line breaks
+/// (`  \n`) within a paragraph; any other break, a code fence, or a blank line
+/// at an edge means it does.
+fn spans_blocks(content: &str, lead: &str, trail: &str) -> bool {
+    let hard_breaks_only = content
+        .split('\n')
+        .rev()
+        .skip(1)
+        .all(|line| line.ends_with("  ") && !line.trim().is_empty());
+    !hard_breaks_only || content.contains("```") || lead.contains("\n\n") || trail.contains("\n\n")
+}
+
+/// Writes emphasized punctuation. It continues an emphasis ending right
+/// before it, as in `<b>a</b><b>:</b>`; otherwise its markers open only after
+/// whitespace or punctuation, as in `a *-*`, and the caller removes them if a
+/// letter follows.
 fn push_punctuation_emphasis(
     acc: &mut String,
     punct: &str,
@@ -315,6 +378,27 @@ fn push_punctuation_emphasis(
     closes_output: bool,
 ) -> Option<Closed> {
     let merges = touching && is_exact_marker_end(acc, marker);
+    // a marker right after another would fuse with it into one run
+    let opens = acc
+        .chars()
+        .next_back()
+        .is_none_or(|c| is_whitespace_or_punctuation(c) && !matches!(c, '*' | '_'));
+    if !merges && opens && !punct.is_empty() {
+        let open = acc.len();
+        acc.push_str(marker);
+        acc.push_str(punct);
+        acc.push_str(marker);
+        if closes_output {
+            return Some(Closed {
+                open,
+                tail: 0,
+                merged: false,
+                removable: true,
+            });
+        }
+        acc.push(' ');
+        return None;
+    }
     let open = acc.len().saturating_sub(marker.len());
     if merges {
         acc.truncate(open);
@@ -340,6 +424,39 @@ fn push_punctuation_emphasis(
     None
 }
 
+/// Punctuation emphasized inside without the inner markers, which could not
+/// see what precedes it; `None` for content with anything else.
+fn without_inner_markers(s: &str) -> Option<String> {
+    let mut out = String::with_capacity(s.len());
+    let mut escaped = false;
+    for c in s.chars() {
+        if escaped || !matches!(c, '*' | '_') {
+            out.push(c);
+        }
+        escaped = !escaped && c == '\\';
+    }
+    out.chars().all(is_whitespace_or_punctuation).then_some(out)
+}
+
+/// Whether `content` opens with an emphasis run followed by punctuation:
+/// merged into the emphasis before it, the run would follow that emphasis's
+/// text, where it cannot open.
+pub(super) fn opens_on_punctuation(content: &str) -> bool {
+    content.starts_with(['*', '_'])
+        && content
+            .trim_start_matches(['*', '_'])
+            .starts_with(is_whitespace_or_punctuation)
+}
+
+/// Whether `content` opens with an emphasis marker of another kind than
+/// `marker`: `~` against `*` or `_`.
+fn starts_other_kind(content: &str, marker: &str) -> bool {
+    content
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c, '*' | '_' | '~') && (c == '~') != marker.starts_with('~'))
+}
+
 /// `s` without the whitespace and `<br>` line breaks at its edges.
 fn trim_breaks(s: &str) -> &str {
     let mut s = s.trim();
@@ -350,8 +467,9 @@ fn trim_breaks(s: &str) -> &str {
 }
 
 /// Whether `CommonMark` reads `c` as whitespace or punctuation next to an
-/// emphasis marker. Unicode punctuation is that of the common blocks: anything
-/// else, such as a zero-width joiner, counts as neither, the safe reading.
+/// emphasis marker. Unicode punctuation is the `P` and `S` categories, as in
+/// `CommonMark` 0.31, of the common blocks and the emoji ones: anything else,
+/// such as a zero-width joiner, counts as neither.
 pub(super) fn is_whitespace_or_punctuation(c: char) -> bool {
     c.is_whitespace()
         || c.is_ascii_punctuation()
@@ -365,7 +483,8 @@ pub(super) fn is_whitespace_or_punctuation(c: char) -> bool {
             | '\u{2190}'..='\u{23ff}' | '\u{2500}'..='\u{2775}' | '\u{2794}'..='\u{27bf}'
             | '\u{3001}'..='\u{3004}' | '\u{3008}'..='\u{3020}' | '\u{3030}' | '\u{3036}'
             | '\u{3037}' | '\u{303d}'..='\u{303f}' | '\u{ff01}'..='\u{ff0f}'
-            | '\u{ff1a}'..='\u{ff20}' | '\u{ff3b}'..='\u{ff40}' | '\u{ff5b}'..='\u{ff65}')
+            | '\u{ff1a}'..='\u{ff20}' | '\u{ff3b}'..='\u{ff40}' | '\u{ff5b}'..='\u{ff65}'
+            | '\u{2b00}'..='\u{2bff}' | '\u{1f000}'..='\u{1faff}')
 }
 
 /// Moves the `tail` bytes of punctuation before the `run` bytes of closing
@@ -402,8 +521,8 @@ fn has_unescaped(s: &str, needle: char) -> bool {
 }
 
 fn is_edge_char(c: char) -> bool {
-    // unescaped `*` and `_` at an edge belong to a nested emphasis marker
-    c != '*' && c != '_' && !c.is_alphanumeric()
+    // unescaped `*`, `_` and `~` at an edge belong to a nested emphasis marker
+    !matches!(c, '*' | '_' | '~') && !c.is_alphanumeric()
 }
 
 /// Splits `s` into its leading run of punctuation and whitespace, the rest,
@@ -547,17 +666,23 @@ pub(super) fn push_code_text(text: &mut String, code_text: &str) {
     }
 
     // a code span right before would merge its closing run with this
-    // opening one: `x` and `y` would give `x``y`, a single span
-    if text.ends_with('`') {
-        text.push(' ');
+    // opening one: `x` and `y` would give `x``y`, a single span; an escaped
+    // backtick does not
+    if let Some(stem) = text.strip_suffix('`') {
+        let backslashes = stem.len() - stem.trim_end_matches('\\').len();
+        if backslashes % 2 == 0 {
+            text.push(' ');
+        }
     }
 
     let fence_len = max_backtick_run(code_text) + 1;
     let bytes = code_text.as_bytes();
     // a backtick at either edge would merge into the fence, and a parser
     // strips one space from each side of content like ` a `
+    // a trailing backslash would also read as escaping a backtick after the span
     let needs_space = bytes.first() == Some(&b'`')
         || bytes.last() == Some(&b'`')
+        || bytes.last() == Some(&b'\\')
         || (bytes.first() == Some(&b' ')
             && bytes.last() == Some(&b' ')
             && bytes.iter().any(|&b| b != b' '));
@@ -571,11 +696,6 @@ pub(super) fn push_code_text(text: &mut String, code_text: &str) {
         text.push(' ');
     }
     text.extend(std::iter::repeat_n('`', fence_len));
-}
-
-pub(super) fn trim_space(s: &mut String) {
-    s.truncate(s.trim_ascii_end().len());
-    s.drain(..s.len() - s.trim_ascii_start().len());
 }
 
 pub(super) fn escape_table_cell_inplace(content: &mut String) {
@@ -660,17 +780,24 @@ mod tests {
         push_normalized_text(&mut text, t, FormatOpts::new());
         assert_eq!(
             text,
-            r"Some text: x \`y\` \*z\* \_w\_ \[v\] \<u> #h >q -l +m !i . .5 5. \|q\|"
+            r"Some text: x \`y\` \*z\* \_w\_ [v\] \<u> #h >q -l +m !i . .5 5. |q|"
         );
 
         // at the beginning of a line, block-starting characters are escaped too
         let mut text = String::new();
         for word in ["#h", ">q", "-l", "+m", "2024.", "5)", "."] {
-            push_escaped_chunk(&mut text, word, true, true);
+            let around = Around {
+                line_start: true,
+                in_link: false,
+                prev: None,
+                space_after: true,
+            };
+            push_escaped_chunk(&mut text, word, true, around);
             text.push(' ');
         }
         text.pop();
-        assert_eq!(text, r"\#h \>q \-l \+m 2024\. 5\) .");
+        // only where it would start a block: `#`, `-` and `+` need a space after
+        assert_eq!(text, r"#h \>q -l +m 2024\. 5\) .");
 
         // escape: false is used for inline code content: only backticks are
         // escaped so they cannot terminate the code span

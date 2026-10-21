@@ -92,10 +92,9 @@ mod tests {
         html_2md_compare("<p># not a heading</p>", "\\# not a heading");
         html_2md_compare("<p>> not a quote</p>", "\\> not a quote");
         html_2md_compare("<p>- not a list</p>", "\\- not a list");
-        // ... and only the first character: later ones in the word are plain
-        // text and have no block meaning
-        html_2md_compare("<p>#tag-name</p>", "\\#tag-name");
-        html_2md_compare("<p>+1-2</p>", "\\+1-2");
+        // ... and only where they would start one: `#` and `+` need a space after
+        html_2md_compare("<p>#tag-name</p>", "#tag-name");
+        html_2md_compare("<p>+1-2</p>", "+1-2");
         html_2md_compare("<p>>foo>bar</p>", "\\>foo>bar");
         // a preceding space on the same line is not a line start
         html_2md_compare("<p><span>foo </span><span>#bar</span></p>", "foo #bar");
@@ -111,15 +110,19 @@ mod tests {
 
         // `!` is only escaped when it could introduce an image
         html_2md_compare("<p>Wow!</p>", "Wow!");
-        html_2md_compare("<p>not ![an image]</p>", "not \\!\\[an image\\]");
+        html_2md_compare("<p>not ![an image]</p>", "not \\![an image\\]");
 
         // Characters with Markdown meaning anywhere in the line are escaped.
         html_2md_compare(
             "<p>a *b* c _d_ e`f` [g]</p>",
-            "a \\*b\\* c \\_d\\_ e\\`f\\` \\[g\\]",
+            "a \\*b\\* c \\_d\\_ e\\`f\\` [g\\]",
         );
-        // `|` always: it must not break generated table rows
-        html_2md_compare("<p>a | b</p>", "a \\| b");
+        // `|` only in tables, whose cells escape it so it cannot break a row
+        html_2md_compare("<p>a | b</p>", "a | b");
+        html_2md_compare(
+            "<table><tr><td>a | b</td></tr></table>",
+            "|   |\n| - |\n| a \\| b |",
+        );
     }
 
     #[test]
@@ -803,13 +806,12 @@ Another Paragraph";
             r"My favorite search engine is **[Duck Duck Go](https://duckduckgo.com)**.";
         html_2md_compare(bold_contents, bold_expected);
 
-        // bold inside of link is not supported.
-        let bold_ignored_contents = r#"<p>My favorite search engine is <a href="https://duckduckgo.com"><b>Duck Duck Go</b></a>.</p>"#;
-        let bold_ignored_expected =
-            r"My favorite search engine is [Duck Duck Go](https://duckduckgo.com).";
-        html_2md_compare(bold_ignored_contents, bold_ignored_expected);
+        // the link text keeps its formatting
+        let bold_inside_contents = r#"<p>My favorite search engine is <a href="https://duckduckgo.com"><b>Duck Duck Go</b></a>.</p>"#;
+        let bold_inside_expected =
+            r"My favorite search engine is [**Duck Duck Go**](https://duckduckgo.com).";
+        html_2md_compare(bold_inside_contents, bold_inside_expected);
 
-        // any elements inside `a` elements are also ignored,
         // html5ever transforms a > div to div > a, and there is no way to determine how it was.
         // This is an open question.
         let ignored_contents = r#"<p>My favorite search engine is <a href="https://duckduckgo.com"><div>Duck Duck Go</div></a>.</p>"#;
@@ -832,7 +834,7 @@ Another Paragraph";
         let content = r##"<p>See <a href="http://x">[Link]</a> and <a href="http://y">utm_source</a></p>
             <h2>What I wanted <a href="#w">#</a></h2>"##;
         let expected = concat!(
-            "See [\\[Link\\]](http://x) and [utm\\_source](http://y)\n\n",
+            "See [\\[Link\\]](http://x) and [utm_source](http://y)\n\n",
             "## What I wanted [#](#w)"
         );
         html_2md_compare(content, expected);
@@ -1528,7 +1530,7 @@ fn main() {
         html_2md_compare("<p>a<code></code>b</p>", "ab");
         // a whitespace-only one is a valid code span
         html_2md_compare("<p><code>  </code>x</p>", "` `x");
-        html_2md_compare("<p>a<code></code>|<code> </code>b</p>", "a\\|` `b");
+        html_2md_compare("<p>a<code></code>|<code> </code>b</p>", "a|` `b");
         // adjacent code spans are kept apart: `x``y` would be a single span
         let md = "`x` `y`";
         html_2md_compare("<p><code>x</code><code>y</code></p>", md);
@@ -1767,7 +1769,7 @@ fn main() {
     fn ours_test_link_trailing_space_after_destination() {
         html_2md_compare(
             "<p>Copyright © <a href=\"/x\">2026 </a>Lead2Goals.</p>",
-            "Copyright © [2026 ](/x)Lead2Goals.",
+            "Copyright © [2026](/x) Lead2Goals.",
         );
     }
 
@@ -1863,7 +1865,7 @@ fn main() {
     fn ours_test_line_start_block_syntax_escaped() {
         html_2md_compare(
             "<p>valeurs U sont<br>- fenêtre simple</p><p>-5 degrees</p><p>==========</p><p>~~~~~~~~ text</p><p><em>- Friedrich Schiller</em></p>",
-            "valeurs U sont  \n\\- fenêtre simple\n\n\\-5 degrees\n\n\\==========\n\n\\~\\~\\~\\~\\~\\~\\~\\~ text\n\n*\\- Friedrich Schiller*",
+            "valeurs U sont  \n\\- fenêtre simple\n\n-5 degrees\n\n\\==========\n\n\\~\\~\\~\\~\\~\\~\\~\\~ text\n\n*\\- Friedrich Schiller*",
         );
     }
 
@@ -1895,7 +1897,7 @@ fn main() {
     fn ours_test_emphasis_leading_punctuation_kept_after_space() {
         html_2md_compare(
             "<p><strong>[v1]</strong> and x<strong>[v2]</strong>y</p>",
-            "**\\[v1\\]** and x\\[**v2**\\]y",
+            "**[v1\\]** and x[**v2**\\]y",
         );
     }
 
@@ -2010,7 +2012,7 @@ fn main() {
     fn ours_test_heading_items_become_words() {
         html_2md_compare(
             "<h6><ul><li><a>Career</a></li><span>|</span><li><a>Contact us</a></li></ul></h6>",
-            "###### Career \\| Contact us",
+            "###### Career | Contact us",
         );
     }
 
@@ -2050,8 +2052,13 @@ fn main() {
     #[test]
     fn ours_test_pre_breaks_and_blocks_kept() {
         html_2md_compare(
-            "<pre><p>line one.</p><p>line two</p>tail<br>• a</pre>",
+            "<pre><div>line one.</div><div>line two</div>tail<br>• a</pre>",
             "```\nline one.\nline two\ntail\n• a\n```",
+        );
+        // a `<pre>` holding paragraphs is a styled container, not code
+        html_2md_compare(
+            "<pre><p>For the cat lover!</p><p><strong>By: </strong>Ross</p></pre>",
+            "For the cat lover!\n\n**By:** Ross",
         );
     }
 
@@ -2159,6 +2166,156 @@ fn main() {
         html_2md_compare(
             "<table><tr><td>x<pre>a\nb</pre></td></tr></table>",
             "|   |\n| - |\n| x<br>`a`<br>`b` |",
+        );
+    }
+
+    #[test]
+    fn ours_test_spec_round_trip_gaps() {
+        // emphasis around punctuation keeps its markers where they parse
+        html_2md_compare("<p><em>-</em></p>", "*\\-*");
+        html_2md_compare("<p>foo <strong>_</strong></p>", "foo **\\_**");
+        html_2md_compare("<p>x <b>(</b>y</p>", "x (y");
+        // emoji count as punctuation, as in CommonMark 0.31
+        html_2md_compare("<p><b>📝</b>Please</p>", "📝Please");
+        html_2md_compare("<p>a <b>😊 b</b> c</p>", "a **😊 b** c");
+        // punctuation emphasized twice after a letter loses both
+        html_2md_compare("<p>aniya<strong><em>.</em></strong></p>", "aniya.");
+        // and emphasis holding nothing writes no markers
+        html_2md_compare(
+            "<table><tr><td>2010<i><br></i> - x</td></tr></table>",
+            "|   |\n| - |\n| 2010<br> - x |",
+        );
+        // a list right after a list of the same kind writes the other marker
+        html_2md_compare(
+            "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+            "- a\n\n+ b\n\n- c",
+        );
+        html_2md_compare(
+            "<ol><li>a</li></ol><ol start=\"2\"><li>b</li></ol>",
+            "1. a\n\n2) b",
+        );
+        // a list opening an item follows its marker with no blank line
+        html_2md_compare(
+            "<ol><li><ul><li><ol start=\"2\"><li>foo</li></ol></li></ul></li></ol>",
+            "1.\n   -\n     2. foo",
+        );
+        // a code language is kept as written, with what a fence cannot hold dropped
+        html_2md_compare(
+            "<pre><code class=\"language-föö\">foo</code></pre>",
+            "```föö\nfoo\n```",
+        );
+        html_2md_compare("<pre><code class=\"language-;\"></code></pre>", "```;\n```");
+        // an escaped backtick does not merge with the code span after it
+        html_2md_compare("<p>a`<code>b</code></p>", "a\\``b`");
+    }
+
+    #[test]
+    fn ours_test_strikethrough_tasks_and_link_formatting() {
+        html_2md_compare(
+            "<p><del>Hi</del> Hello, <s>$20</s> $15</p>",
+            "~~Hi~~ Hello, ~~$20~~ $15",
+        );
+        html_2md_compare(
+            "<ul><li><input type=\"checkbox\" checked> done</li><li><input type=\"checkbox\"> todo</li></ul>",
+            "- [x] done\n- [ ] todo",
+        );
+        // a checkbox outside a list item has no task syntax
+        html_2md_compare("<p><input type=\"checkbox\"> x</p>", "x");
+        html_2md_compare(
+            "<p>See <a href=\"/api\"><code>Vec::new</code></a> and <a href=\"/x\"><em>the guide</em></a>.</p>",
+            "See [`Vec::new`](/api) and [*the guide*](/x).",
+        );
+    }
+
+    #[test]
+    fn ours_test_review_round_two() {
+        // a removable closing run inside another is removed with it
+        html_2md_compare("<p>x <b><i>-</i></b>y</p>", "x \\-y");
+        html_2md_compare("<p>x <del><b>-</b></del>y</p>", "x \\-y");
+        // a run closing inside another moves its punctuation out of both,
+        // across links too
+        html_2md_compare(
+            "<p>(“<a><b><i>AI</i></b></a><b><i>” and “</i></b><a><b><i>D</i></b></a><b><i>”).</i></b> W</p>",
+            "(“***AI***__*” and*__ “***D***”). W",
+        );
+        // `~~` and `*` runs never read as one
+        html_2md_compare("<p><del><i>x</i></del>y</p>", "*x*y");
+        html_2md_compare("<p><i><del>x</del></i>y</p>", "~~x~~y");
+        html_2md_compare("<p>a <del><b>x</b></del> b</p>", "a ~~**x**~~ b");
+        // an emoji joined by a zero-width joiner is punctuation too
+        html_2md_compare("<p>x <b>👨\u{200d}👩</b>y</p>", "x 👨\u{200d}👩y");
+        // a code span ending in a backslash does not escape the next one
+        html_2md_compare("<p><code>a\\</code><code>b</code></p>", "` a\\ ` `b`");
+        // a link inside a link is written as its text
+        html_2md_compare(
+            "<p><a href=\"/1\">x<table><tr><td><a href=\"/2\">y</a></td></tr></table></a></p>",
+            "[x y](/1)",
+        );
+        // a link's text is past any line start, and only shown text spaces it
+        html_2md_compare("<p><a href=\"/u\">1. x</a></p>", "[1. x](/u)");
+        html_2md_compare("<p><a href=\"/u\">x<script> </script></a>y</p>", "[x](/u)y");
+        // a checkbox is a task only right after an item's marker, outside cells
+        html_2md_compare(
+            "<ul><li>x <input type=checkbox> a</li><li><input type=checkbox> c</li></ul>",
+            "- x a\n- [ ] c",
+        );
+        // text in any script may come before a list
+        html_2md_compare("<p>تولّت ส ©</p><ul><li>a</li></ul>", "تولّت ส ©\n\n- a");
+        // an empty list sets nothing apart
+        html_2md_compare(
+            "<ul><li>a</li></ul><ul></ul><ul><li>c</li></ul>",
+            "- a\n\n+ c",
+        );
+    }
+
+    #[test]
+    fn ours_test_item_start_and_orphan_items() {
+        // a line break or spaces opening an item do not move its text off the
+        // marker's line or content column
+        html_2md_compare(
+            "<ul><li><i></i><br><span>Schedule</span></li><li><br>Guests</li></ul>",
+            "- Schedule\n- Guests",
+        );
+        html_2md_compare(
+            "<ul><li><span><i> </i></span><span>Op:</span></li><ul><li>Reg</li></ul></ul>",
+            "- Op:\n  - Reg",
+        );
+        // an item outside a list indents its blocks under it
+        html_2md_compare(
+            "<li><strong>Definitions</strong><ol><li>TPML means</li></ol></li>",
+            "- **Definitions**\n  1. TPML means",
+        );
+    }
+
+    #[test]
+    fn ours_test_nested_writes_keep_saved_offsets() {
+        // a nested write rewriting bytes before an item's saved offsets
+        for html in [
+            "<b><ul><li><ul><li><p>x　</p></li></ul></li></ul></b>",
+            "<del><li><ul><li>\u{200d}<h2>👧</h2>",
+            "<b><ul><li><ul><li><p>日</p><hr></li></ul></li></ul></b>",
+            "<ul><li><pre><ul><li><p>x　</p></li></ul></pre></li></ul>",
+            "<ul><li><em><table></table></em></li></ul>",
+        ] {
+            let _ = Document::from(html).md(None);
+        }
+        html_2md_compare(
+            "<ul><li><b>x</b><b>日<p>b</p></b></li></ul>",
+            "- **x日**\n\n  **b**",
+        );
+        // emphasis around a list applies to each item's text
+        html_2md_compare(
+            "<b><ul><li>a<ul><li>x</li></ul></li><li>b</li></ul></b>",
+            "- **a**\n  - **x**\n- **b**",
+        );
+    }
+
+    #[test]
+    fn ours_test_no_merge_before_inner_run_on_punctuation() {
+        // merged into the bold before it, the italic would open after a letter
+        html_2md_compare(
+            "<p><a><strong>Flowers</strong></a><strong><em>, which will.</em></strong></p>",
+            "**Flowers**__*, which will.*__",
         );
     }
 }

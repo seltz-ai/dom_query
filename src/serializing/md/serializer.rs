@@ -15,8 +15,8 @@ use super::constants::{
 use super::text_utils::{
     add_linebreaks, escape_closing_hashes, escape_table_cell_inplace, escape_trailing_bang,
     is_exact_marker_end, is_whitespace_or_punctuation, linebreak, max_backtick_run, move_tail_out,
-    push_code_text, push_emphasis, push_md_url, push_normalized_text, push_title, remove_emphasis,
-    sanitize_attr_value, trim_space, trim_trailing_space,
+    opens_on_punctuation, push_code_text, push_emphasis, push_md_url, push_normalized_text,
+    push_title, remove_emphasis, sanitize_attr_value, trim_trailing_space,
 };
 
 use super::opts::{EmphasisScope, FormatOpts, ListContext, ListKind};
@@ -72,6 +72,7 @@ impl<'a> MDSerializer<'a> {
         let linebreak = linebreak(opts.table_cell);
         let double_br = linebreak.repeat(2);
         let mut pending: Option<PendingClose> = None;
+        let entry = text.len();
 
         while let Some(op) = ops.pop() {
             match op {
@@ -164,26 +165,14 @@ impl<'a> MDSerializer<'a> {
         }
 
         if trim {
-            trim_space(text);
-        }
-        pending.filter(|p| p.end == text.len())
-    }
-
-    fn write_text(&self, text: &mut String, root_id: NodeId, opts: FormatOpts) {
-        let mut ops = if opts.include_node {
-            vec![root_id]
-        } else {
-            child_nodes(Ref::clone(&self.nodes), &root_id, true).collect()
-        };
-
-        while let Some(id) = ops.pop() {
-            let node = &self.nodes[id.value()];
-            if let NodeData::Text { contents } = &node.data {
-                push_normalized_text(text, contents, opts);
-            } else if let NodeData::Element(_e) = &node.data {
-                ops.extend(child_nodes(Ref::clone(&self.nodes), &id, true));
+            text.truncate(text.trim_ascii_end().len());
+            // the buffer's start, only when nothing but whitespace came before
+            // this call's output: an item's indent and marker stay where saved
+            if text[..char_floor(text, entry)].trim_ascii().is_empty() {
+                text.drain(..text.len() - text.trim_ascii_start().len());
             }
         }
+        pending.filter(|p| p.end == text.len())
     }
 
     fn write_element(
@@ -208,9 +197,27 @@ impl<'a> MDSerializer<'a> {
             local_name!("blockquote") if opts.table_cell => return false,
             local_name!("ol") | local_name!("ul") => self.write_list(text, tree_node, e, opts),
             // without href, its contents are written as those of any inline element
-            local_name!("a") if e.has_attr("href") => self.write_link(text, tree_node),
+            local_name!("a") if e.has_attr("href") && !opts.in_link => {
+                self.write_link(text, tree_node);
+            }
             local_name!("img") => Self::write_img(text, tree_node),
+            // a task list item's checkbox
+            local_name!("input")
+                if opts.list_item
+                    && !opts.table_cell
+                    && ends_with_item_marker(text)
+                    && e.attr("type")
+                        .is_some_and(|t| t.eq_ignore_ascii_case("checkbox")) =>
+            {
+                text.push_str(if e.has_attr("checked") {
+                    "[x] "
+                } else {
+                    "[ ] "
+                });
+            }
             // a cell holds one line: a code block becomes code spans
+            // a `<pre>` holding prose, as a styled container, is not code
+            local_name!("pre") if self.pre_holds_prose(tree_node.id) => return false,
             local_name!("pre") if opts.single_line => self.write_line_code(text, tree_node),
             local_name!("pre") if opts.table_cell => {
                 add_cell_block_break(text, "<br>");
@@ -232,15 +239,13 @@ impl<'a> MDSerializer<'a> {
         if !text.is_empty() {
             add_linebreaks(text, "\n", "\n\n");
         }
-        text.push_str("- ");
-        self.write(
-            text,
-            id,
-            FormatOpts {
-                include_node: false,
-                ..opts.list_item()
-            },
-        );
+        // written as the only item of a list, its blocks indented under it
+        let mut ctx = ListContext::new(opts, ListKind::Ul);
+        if self.item_has_blocks(&NodeRef::new(id, self.root_node.tree)) {
+            self.write_list_item_blocks(text, id, &mut ctx);
+        } else {
+            self.write_list_item(text, id, &mut ctx);
+        }
         add_linebreaks(text, "\n", "\n\n");
     }
 
@@ -358,11 +363,13 @@ impl<'a> MDSerializer<'a> {
                 .chars()
                 .next_back()
                 .is_some_and(char::is_alphanumeric);
-        let fused = run > 0
+        let fused = emphasis.starts_with('*')
+            && run > 0
             && !reads_as_both
             && !text[..text.len() - run].ends_with('\\')
             && !emphasis_text.starts_with(char::is_whitespace)
-            && !is_exact_marker_end(text, emphasis);
+            && (!is_exact_marker_end(text, emphasis)
+                || opens_on_punctuation(emphasis_text.trim_start()));
         if fused {
             // `_b_` loses its markers if a letter follows it, then the run
             // before it needs no punctuation inside either
@@ -371,22 +378,41 @@ impl<'a> MDSerializer<'a> {
             }
             marker = underscore_marker(emphasis);
         }
+        // a run of the other kind, `~` against `*` or `_`, reads as punctuation
+        // before this closing run, which then needs whitespace or punctuation after
+        let ends_other_kind = emphasis_text
+            .trim_end()
+            .chars()
+            .next_back()
+            .is_some_and(|c| matches!(c, '*' | '_' | '~') && (c == '~') != marker.starts_with('~'));
         let closed = push_emphasis(text, &emphasis_text, marker)?;
-        // removed if a letter follows: `_` markers, or ones around a code span
-        let removable = (marker.starts_with('_') || closed.removable) && !closed.merged;
+        // removed if a letter follows: `_` markers, ones around a code span or
+        // punctuation, or ones closing right after a run of the other kind
+        let removable =
+            (marker.starts_with('_') || closed.removable || ends_other_kind) && !closed.merged;
         match inner {
-            // a closing run that ends the content ends this one's run too
-            Some(p) if closed.tail == 0 => Some(PendingClose {
-                end: text.len(),
-                run: p.run + marker.len(),
-                tail: p.tail,
-                remove: None,
-            }),
-            _ if closed.tail > 0 || removable => Some(PendingClose {
+            // a closing run that ends the content ends this one's run too, and
+            // its punctuation moves out of both; not when this one has markers
+            // of its own to remove, whose content holds none
+            Some(p) if closed.tail == 0 && !closed.removable && !ends_other_kind => {
+                Some(PendingClose {
+                    end: text.len(),
+                    run: p.run + marker.len(),
+                    tail: p.tail,
+                    remove: None,
+                })
+            }
+            _ if removable => Some(PendingClose {
                 end: text.len(),
                 run: marker.len(),
                 tail: closed.tail,
-                remove: removable.then_some((closed.open, marker)),
+                remove: Some((closed.open, marker)),
+            }),
+            _ if closed.tail > 0 => Some(PendingClose {
+                end: text.len(),
+                run: marker.len(),
+                tail: closed.tail,
+                remove: None,
             }),
             _ => None,
         }
@@ -399,8 +425,18 @@ impl<'a> MDSerializer<'a> {
         trim_trailing_space(text);
         text.push_str(&ctx.list_indent());
         text.push_str(&prefix);
-        if ctx.opts.block_emphasis.is_empty() {
-            self.write(text, node_id, ctx.opts.list_item());
+        if ctx.opts.block_emphasis.is_empty() || self.has_block_descendant(node_id) {
+            let marker_end = text.trim_end().len();
+            if ctx.opts.block_emphasis.is_empty() {
+                self.write(text, node_id, ctx.opts.list_item());
+            } else {
+                // its text runs apply the emphasis, and its list passes it on
+                self.write_mixed(text, node_id, ctx.opts.list_item());
+                text.truncate(text.trim_end().len().max(char_floor(text, marker_end)));
+            }
+            // a list opening the item has no paragraph to set apart from
+            join_list_to_marker(text, marker_end);
+            tidy_item_start(text, marker_end);
         } else {
             // an item is a text block: emphasis spanning blocks applies within it
             let mut item = String::new();
@@ -456,6 +492,33 @@ impl<'a> MDSerializer<'a> {
                 _ => None,
             }
         })
+    }
+
+    /// Whether a `<pre>` holds paragraphs, headings, lists, tables or quotes and
+    /// no code: blocks of lines, as some highlighters write, are still code.
+    fn pre_holds_prose(&self, id: NodeId) -> bool {
+        let mut prose = false;
+        for d in descendant_nodes(Ref::clone(&self.nodes), &id) {
+            let Some(e) = self.nodes[d.value()].as_element() else {
+                continue;
+            };
+            match e.name.local {
+                local_name!("code") => return false,
+                local_name!("p")
+                | local_name!("h1")
+                | local_name!("h2")
+                | local_name!("h3")
+                | local_name!("h4")
+                | local_name!("h5")
+                | local_name!("h6")
+                | local_name!("ul")
+                | local_name!("ol")
+                | local_name!("table")
+                | local_name!("blockquote") => prose = true,
+                _ => {}
+            }
+        }
+        prose
     }
 
     fn has_block_descendant(&self, id: NodeId) -> bool {
@@ -587,7 +650,7 @@ impl<'a> MDSerializer<'a> {
         } else {
             ctx.opts.list_item()
         };
-        let marker_end = text[..item_start].trim_end().len();
+        let marker_end = text[..char_floor(text, item_start)].trim_end().len();
         let at_item_start = text.trim_end().len() == marker_end;
         let block_start = text.trim_end_matches(' ').len();
         self.write(text, c.id, opts.include_node());
@@ -597,6 +660,16 @@ impl<'a> MDSerializer<'a> {
             // its blocks are written from column zero
             keep_block_in_item(text, block_start, item_start, block_indent);
         }
+    }
+
+    /// Whether an item holds blocks of its own, written on their own lines.
+    fn item_has_blocks(&self, item: &NodeRef) -> bool {
+        item.children_it(false).any(|n| {
+            node_is_list_item_block(&n)
+                || node_is_block_wrapper(&n)
+                || node_is_inline_wrapper(&n)
+                || self.is_block_emphasis(&n)
+        })
     }
 
     /// An emphasis around blocks, which applies it to each of them.
@@ -632,13 +705,13 @@ impl<'a> MDSerializer<'a> {
             let prefix_start = text.len();
             text.push_str(prefix);
             self.write(text, c.id, ctx.opts.list_item().single_line());
-            if text[prefix_start.min(text.len())..]
+            if text[char_floor(text, prefix_start)..]
                 .trim_start_matches('#')
                 .trim()
                 .is_empty()
             {
                 // nothing to show: no heading at all
-                text.truncate(prefix_start.min(text.len()));
+                text.truncate(char_floor(text, prefix_start));
             }
         } else {
             self.write(text, c.id, ctx.opts.list_item());
@@ -671,7 +744,7 @@ impl<'a> MDSerializer<'a> {
                 .is_some_and(|t| t.ends_with('\n'));
         if !at_line_start {
             // a trailing hard break is redundant before the block
-            text.truncate(text.trim_end().len().max(item_start));
+            text.truncate(text.trim_end().len().max(char_floor(text, item_start)));
             text.push_str(ctx.linebreak());
             text.push_str(block_indent);
         }
@@ -698,7 +771,13 @@ impl<'a> MDSerializer<'a> {
             ListKind::Ul
         };
 
-        let mut ctx = ListContext::new(opts, kind);
+        // a list right after a list with the same marker would continue it; a
+        // cell writes its lists as text, where none can continue another
+        let ordered = matches!(kind, ListKind::Ol(_));
+        let default_marker = if ordered { '.' } else { '-' };
+        let other_marker = !opts.table_cell
+            && prev_list_marker(text, opts.offset, ordered) == Some(default_marker);
+        let mut ctx = ListContext::new(opts, kind).other_marker(other_marker);
         let mut after_item = false;
         // content outside the items, gathered up to the next item or list
         let mut outside: Vec<NodeId> = Vec::new();
@@ -734,12 +813,7 @@ impl<'a> MDSerializer<'a> {
                     .is_some_and(|e| e.name.local == local_name!("li"))
             });
 
-            let has_blocks = child_node.children_it(false).any(|n| {
-                node_is_list_item_block(&n)
-                    || node_is_block_wrapper(&n)
-                    || node_is_inline_wrapper(&n)
-                    || self.is_block_emphasis(&n)
-            });
+            let has_blocks = self.item_has_blocks(&child_node);
 
             if is_list_item && matches!(ctx.kind, ListKind::Ol(_)) {
                 // `<li value>` renumbers this item and the ones after it
@@ -837,44 +911,36 @@ impl<'a> MDSerializer<'a> {
             return;
         };
 
-        let mut link_text = String::new();
-        let has_img = self.has_descendant_img(&link_node.id);
-
-        let mut is_md_body = false;
-        // try to collect plain text if there is no image
-        if !has_img {
-            let link_opts = FormatOpts::new().include_node().skip_escape();
-            self.write_text(&mut link_text, link_node.id, link_opts);
-        }
         // a link with only whitespace to show still separates the words around it
-        if !link_text.is_empty() && link_text.trim_ascii().is_empty() {
-            push_normalized_text(text, &link_text, default_opts);
+        let shown = self.shown_text(link_node.id);
+        if !shown.is_empty()
+            && shown.trim_ascii().is_empty()
+            && !self.has_descendant_img(&link_node.id)
+        {
+            push_normalized_text(text, &shown, default_opts);
             return;
         }
-        // serialize as markdown if body contains images or non-text elements
-        if has_img || link_text.is_empty() {
-            // link text cannot span a blank line or hold a block marker
-            let body_opts = if has_img {
-                default_opts.single_line()
-            } else {
-                default_opts
-            };
-            self.write(&mut link_text, link_node.id, body_opts);
-            is_md_body = true;
-        }
-
+        // its text keeps its formatting; it cannot span a blank line or hold
+        // a block marker
+        let mut link_text = String::new();
+        self.write(
+            &mut link_text,
+            link_node.id,
+            default_opts.single_line().in_link(),
+        );
         if link_text.is_empty() {
             return;
         }
 
+        // spaces at the edges of the text, which the body drops, separate the
+        // link from the words around it
+        if shown.starts_with(|c: char| c.is_ascii_whitespace()) {
+            push_space(text);
+        }
         // an unescaped trailing `!` would turn `[x](u)` into image syntax
         escape_trailing_bang(text);
         text.push('[');
-        if is_md_body {
-            text.push_str(&link_text);
-        } else {
-            push_normalized_text(text, &link_text, default_opts);
-        }
+        text.push_str(&link_text);
 
         text.push_str("](");
         push_md_url(text, &href);
@@ -884,6 +950,23 @@ impl<'a> MDSerializer<'a> {
         }
 
         text.push(')');
+        if shown.ends_with(|c: char| c.is_ascii_whitespace()) {
+            text.push(' ');
+        }
+    }
+
+    /// The text a node shows: none of its skipped elements', such as scripts.
+    fn shown_text(&self, id: NodeId) -> String {
+        let mut shown = String::new();
+        let mut stack = vec![id];
+        while let Some(id) = stack.pop() {
+            match &self.nodes[id.value()].data {
+                NodeData::Text { contents } => shown.push_str(contents),
+                NodeData::Element(e) if self.skip_tags.contains(&e.name.local.as_ref()) => {}
+                _ => stack.extend(child_nodes(Ref::clone(&self.nodes), &id, true)),
+            }
+        }
+        shown
     }
 
     fn has_descendant_img(&self, id: &NodeId) -> bool {
@@ -917,7 +1000,8 @@ impl<'a> MDSerializer<'a> {
             text.push_str("![");
 
             if let Some(alt) = el.attr_ref(local_name!("alt")) {
-                push_normalized_text(text, alt, FormatOpts::new());
+                // an image's description balances its brackets as a link's text does
+                push_normalized_text(text, alt, FormatOpts::new().in_link());
             }
             text.push(']');
             text.push('(');
@@ -1188,7 +1272,7 @@ const fn is_md_block(name: &QualName) -> bool {
 /// column zero are indented, as either would otherwise end the item. Nested
 /// lists come already indented.
 fn keep_block_in_item(text: &mut String, start: usize, item_start: usize, indent: &str) {
-    let start = start.min(text.len());
+    let start = char_floor(text, start);
     let (head, written) = text.split_at(start);
     let mut fixed = String::with_capacity(written.len() + indent.len());
     let mut lines = written.split('\n');
@@ -1217,9 +1301,78 @@ fn keep_block_in_item(text: &mut String, start: usize, item_start: usize, indent
     text.push_str(&fixed);
 }
 
+/// The marker of the list item `text` ends with at `indent` columns, past
+/// blank lines and lines nested deeper: `-` or `+` for a bullet list, `.` or
+/// `)` for an ordered one. `None` when anything else ends it at that indent.
+fn prev_list_marker(text: &str, indent: usize, ordered: bool) -> Option<char> {
+    for line in text.lines().rev() {
+        let content = line.trim_start_matches(' ');
+        let depth = line.len() - content.len();
+        if content.is_empty() || depth > indent {
+            continue;
+        }
+        if depth < indent {
+            return None;
+        }
+        let digits = content.len()
+            - content
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .len();
+        let marker = content[digits..].chars().next()?;
+        let rest = &content[digits + marker.len_utf8()..];
+        let spaced = rest.is_empty() || rest.starts_with(' ');
+        return match (ordered, digits > 0, marker) {
+            (false, false, '-' | '+') | (true, true, '.' | ')') if spaced => Some(marker),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// Whether `text` ends with a list item's marker and nothing after it on the
+/// line, where a task list item's checkbox goes.
+fn ends_with_item_marker(text: &str) -> bool {
+    let line = text.rsplit('\n').next().unwrap_or(text).trim();
+    let digits = line.trim_end_matches(['.', ')']);
+    matches!(line, "-" | "+" | "*")
+        || (digits.len() + 1 == line.len()
+            && !digits.is_empty()
+            && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Drops what an item's text opens with that would move it off its marker's
+/// content column: spaces beyond the one after the marker, or a hard break
+/// with nothing before it, which would leave the text at column zero.
+fn tidy_item_start(text: &mut String, marker_end: usize) {
+    let marker_end = char_floor(text, marker_end);
+    let rest = &text[marker_end..];
+    let spaces = rest.len() - rest.trim_start_matches(' ').len();
+    let after = &rest[spaces..];
+    let cut = if after.starts_with('\n') && after[1..].starts_with(|c: char| c != ' ' && c != '\n')
+    {
+        spaces + 1
+    } else if spaces > 1 && !after.is_empty() && !after.starts_with('\n') {
+        spaces
+    } else {
+        return;
+    };
+    text.replace_range(marker_end..marker_end + cut, " ");
+}
+
+/// `i` within `text` and moved down to a character boundary: an offset saved
+/// before a nested write, which may have rewritten some bytes before it.
+fn char_floor(text: &str, i: usize) -> usize {
+    let mut i = i.min(text.len());
+    while !text.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// Joins a list written right after a bare item marker to it: a blank line
 /// after the marker would end the item.
 fn join_list_to_marker(text: &mut String, marker_end: usize) {
+    let marker_end = char_floor(text, marker_end);
     let breaks = text[marker_end..].len() - text[marker_end..].trim_start_matches('\n').len();
     if breaks > 1 {
         text.replace_range(marker_end..marker_end + breaks, "\n");
@@ -1230,7 +1383,7 @@ fn join_list_to_marker(text: &mut String, marker_end: usize) {
 /// blank line: spaces written by its last child would leave another.
 fn end_item(text: &mut String, item_start: usize, ctx: &ListContext) {
     if !ctx.opts.table_cell {
-        let end = text.trim_end().len().max(item_start);
+        let end = text.trim_end().len().max(char_floor(text, item_start));
         let breaks = text[end..].matches('\n').count().min(2);
         text.truncate(end);
         text.push_str(&"\n".repeat(breaks));
@@ -1469,6 +1622,7 @@ const fn md_emphasis(name: &QualName) -> Option<&'static str> {
     match name.local {
         local_name!("strong") | local_name!("b") => Some("**"),
         local_name!("em") | local_name!("i") => Some("*"),
+        local_name!("del") | local_name!("s") | local_name!("strike") => Some("~~"),
         _ => None,
     }
 }
