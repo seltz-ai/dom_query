@@ -2,9 +2,9 @@ name: Coverage
 
 on:
   push:
-    branches: [ "main", "seltz" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "seltz" ]
+    branches: [ "main" ]
 
 jobs:
   coverage:
