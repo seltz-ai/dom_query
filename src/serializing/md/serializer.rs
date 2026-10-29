@@ -1655,61 +1655,71 @@ fn table_layout<'a>(
         .filter(|(_, cells)| !cells.is_empty())
         .collect();
     let max_rows = rows.len();
+    // each row as the columns its cells start in, since padding every row to
+    // the full width costs rows × columns even for columns dropped below
     let mut header = None;
-    let mut grid: TableRows = Vec::with_capacity(rows.len());
+    let mut placed: Vec<Vec<(usize, NodeRef)>> = Vec::with_capacity(rows.len());
     // for each column, how many more rows a cell from above still takes
     let mut taken: Vec<usize> = Vec::new();
+    let mut columns = 0;
     for (row_id, cells) in rows {
-        let mut line = Vec::new();
+        let mut line = Vec::with_capacity(cells.len());
         let mut cells = cells.into_iter();
+        let mut col = 0;
         loop {
-            let col = line.len();
             if taken.get(col).is_some_and(|&n| n > 0) {
                 taken[col] -= 1;
-                line.push(None);
+                col += 1;
                 continue;
             }
             let Some(cell) = cells.next() else {
                 break;
             };
             let below = cell_span(&cell, "rowspan", max_rows) - 1;
-            for i in 0..cell_span(&cell, "colspan", MAX_COLSPAN) {
-                let col = line.len();
-                if taken.len() <= col {
-                    taken.resize(col + 1, 0);
-                }
-                taken[col] = below;
-                line.push((i == 0).then_some(cell));
+            let end = col + cell_span(&cell, "colspan", MAX_COLSPAN);
+            if taken.len() < end {
+                taken.resize(end, 0);
             }
+            taken[col..end].fill(below);
+            line.push((col, cell));
+            col = end;
         }
         // columns past the row's last cell, taken from above
-        for n in taken.iter_mut().skip(line.len()) {
+        for n in taken.iter_mut().skip(col) {
             *n = n.saturating_sub(1);
         }
+        columns = columns.max(col);
         if header_id == Some(row_id) {
             header = Some(line);
         } else {
-            grid.push(line);
+            placed.push(line);
         }
     }
-    let columns = grid.iter().chain(header.iter()).map(Vec::len).max()?;
     // a column no cell starts in only continues a span, like the ones
     // `colspan="100"` adds to fill the width, so it holds nothing
-    let mut starts = vec![false; columns];
-    for line in grid.iter().chain(header.iter()) {
-        for (col, cell) in line.iter().enumerate() {
-            starts[col] |= cell.is_some();
+    let mut kept: Vec<Option<usize>> = vec![None; columns];
+    for &(col, _) in placed.iter().chain(header.iter()).flatten() {
+        kept[col] = Some(0);
+    }
+    let mut width = 0;
+    for slot in kept.iter_mut().flatten() {
+        *slot = width;
+        width += 1;
+    }
+    if width == 0 {
+        return None;
+    }
+    let lay_out = |line: Vec<(usize, NodeRef<'a>)>| {
+        let mut row = vec![None; width];
+        for (col, cell) in line {
+            row[kept[col].unwrap_or_default()] = Some(cell);
         }
-    }
-    for line in grid.iter_mut().chain(header.iter_mut()) {
-        line.resize(columns, None);
-        let mut col = 0;
-        line.retain(|_| {
-            col += 1;
-            starts[col - 1]
-        });
-    }
-    Some((header, grid))
+        row
+    };
+    Some((
+        header.map(lay_out),
+        placed.into_iter().map(lay_out).collect(),
+    ))
 }
 
 /// The most columns a cell spans, as in HTML.
