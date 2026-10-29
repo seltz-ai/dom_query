@@ -1953,6 +1953,16 @@ fn main() {
     }
 
     #[test]
+    fn ours_test_list_item_inline_words_not_line_start() {
+        html_2md_compare(
+            "<ul><li><span><i>e</i> = 2.71</span> and Vol.<span> </span>3. London</li></ul>",
+            "- *e* = 2.71 and Vol. 3. London",
+        );
+        html_2md_compare("<ul><li>1. one</li></ul>", "- 1\\. one");
+        html_2md_compare("<ul><li>= x</li></ul>", "- \\= x");
+    }
+
+    #[test]
     fn ours_test_table_spans_laid_out_on_grid() {
         html_2md_compare(
             "<table><tr><td colspan=\"2\">Wide</td><td rowspan=\"2\">R</td></tr><tr><td>a</td><td>b</td></tr></table>",
