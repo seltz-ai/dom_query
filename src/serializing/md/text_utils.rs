@@ -711,35 +711,12 @@ pub(super) fn push_code_text(text: &mut String, code_text: &str) {
     text.extend(std::iter::repeat_n('`', fence_len));
 }
 
+/// GFM splits a row before inline parsing and drops one backslash before
+/// every `|`, even inside code spans, so each pipe gets one more backslash.
 pub(super) fn escape_table_cell_inplace(content: &mut String) {
-    if content.is_empty() || !content.contains('|') {
-        return;
+    if content.contains('|') {
+        *content = content.replace('|', "\\|");
     }
-
-    let bytes = content.as_bytes();
-    let mut result = String::with_capacity(content.len() + 4);
-    let mut last = 0;
-
-    for i in 0..bytes.len() {
-        if bytes[i] == b'|' {
-            // Check if '|' is preceded by an unescaped backslash
-            let is_escaped = i > 0 && bytes[i - 1] == b'\\';
-            if !is_escaped {
-                // Append preceding slice and insert escaping backslash
-                result.push_str(&content[last..i]);
-                result.push('\\');
-                // Set 'last' to 'i' so '|' itself will be included in the next chunk slice
-                last = i;
-            }
-        }
-    }
-    // If all pipes were already escaped, avoid extra string assignment
-    if result.is_empty() {
-        return;
-    }
-    // Append the remaining tail of the string
-    result.push_str(&content[last..]);
-    *content = result;
 }
 
 pub(super) const fn linebreak(br: bool) -> &'static str {

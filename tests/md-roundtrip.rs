@@ -208,10 +208,14 @@ const HTML_INPUTS: &[(&str, &str)] = &[
     ("<p>~a~</p>", "<p>~a~</p>"),
     // a literal backtick before a code span
     ("<p>a`<code>b</code></p>", "<p>a`<code>b</code></p>"),
-    // a backslash before a pipe in a table cell's code
+    // a backslash before a pipe in a table cell's code and text
     (
         "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td><code>a\\|b</code></td></tr>\n</tbody></table>",
         "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td><code>a\\|b</code></td></tr>\n</tbody></table>",
+    ),
+    (
+        "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td>a\\|b <code>c|d</code> <a href=\"/u|v\">l</a></td></tr>\n</tbody></table>",
+        "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td>a\\|b <code>c|d</code> <a href=\"/u%7Cv\">l</a></td></tr>\n</tbody></table>",
     ),
 ];
 
