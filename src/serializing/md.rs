@@ -1971,6 +1971,20 @@ fn main() {
     }
 
     #[test]
+    fn ours_test_table_span_wider_than_any_row_of_cells() {
+        // 4 columns, but no row has more than 2 cells: `y` starts after `b`
+        html_2md_compare(
+            "<table><tr><td colspan=\"3\">x</td><td>y</td></tr><tr><td colspan=\"2\">a</td><td colspan=\"2\">b</td></tr></table>",
+            "|   |   |   |\n| - | - | - |\n| x |  | y |\n| a | b |  |",
+        );
+        // a span to fill the width adds no columns
+        html_2md_compare(
+            "<table><tr><th>A</th><th>B</th></tr><tr><td colspan=\"100\">x</td></tr></table>",
+            "| A | B |\n| - | - |\n| x |  |",
+        );
+    }
+
+    #[test]
     fn ours_test_one_blank_line_before_table_and_fence() {
         html_2md_compare(
             "<p>before</p><table><tr><th>A</th></tr><tr><td>1</td></tr></table><p>code:</p><pre>x</pre>",
