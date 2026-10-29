@@ -42,6 +42,7 @@ const CMARK_IGNORED_EXAMPLES: &[usize] = &[
     218, // [foo] / > [foo]: /url -> ... <blockquote> </blockquote> -> nothing
     239, // > -> <blockquote> </blockquote> -> nothing
     240, // >\n> \n> -> <blockquote> </blockquote> -> nothing
+    79,  // ## / # / ### ### -> <h2></h2><h1></h1><h3></h3> -> nothing
 ];
 
 const FENCE: &str = "````````````````````````````````";
@@ -191,27 +192,32 @@ fn gfm_spec_extensions() {
 /// html that pulldown-cmark rendered from Markdown. Each case is an input
 /// and the html it should show after `md` and a render.
 const HTML_INPUTS: &[(&str, &str)] = &[
-    // emphasis whose `*` run wouldn't be left- or right-flanking
-    ("<p><em>a.</em>b</p>", "<p><em>a.</em>b</p>"),
+    // emphasis whose `*` run wouldn't be left- or right-flanking: Markdown
+    // can't close it there, so the punctuation moves outside
+    ("<p><em>a.</em>b</p>", "<p><em>a</em>.b</p>"),
     (
         "<p>a<strong>-b-</strong>c</p>",
-        "<p>a<strong>-b-</strong>c</p>",
+        "<p>a-<strong>b</strong>-c</p>",
     ),
     // emphasis around a block
     ("<em><p>a</p></em>", "<p><em>a</em></p>"),
-    // a link's leading space
+    // a link's leading space moves before the link
     (
         "<p>x<a href=\"/u\"> a</a></p>",
-        "<p>x<a href=\"/u\"> a</a></p>",
+        "<p>x <a href=\"/u\">a</a></p>",
     ),
     // a literal tilde run
     ("<p>~a~</p>", "<p>~a~</p>"),
     // a literal backtick before a code span
     ("<p>a`<code>b</code></p>", "<p>a`<code>b</code></p>"),
-    // a backslash before a pipe in a table cell's code
+    // a backslash before a pipe in a table cell's code and text
     (
         "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td><code>a\\|b</code></td></tr>\n</tbody></table>",
         "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td><code>a\\|b</code></td></tr>\n</tbody></table>",
+    ),
+    (
+        "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td>a\\|b <code>c|d</code> <a href=\"/u|v\">l</a></td></tr>\n</tbody></table>",
+        "<table><thead><tr><th>h</th></tr></thead><tbody>\n<tr><td>a\\|b <code>c|d</code> <a href=\"/u%7Cv\">l</a></td></tr>\n</tbody></table>",
     ),
 ];
 

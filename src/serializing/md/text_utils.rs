@@ -30,8 +30,10 @@ pub(super) fn push_normalized_text(text: &mut String, new_text: &str, f_opts: Fo
         // spaces before it may be trimmed later, and a line may start with some
         let line = text.trim_end_matches(' ');
         // a heading's or link's text is on its marker's line, past any line start
-        let is_line_start =
-            !f_opts.single_line && (line.is_empty() || line.ends_with('\n') || f_opts.list_item);
+        let is_line_start = !f_opts.single_line
+            && (line.is_empty()
+                || line.ends_with('\n')
+                || (f_opts.list_item && ends_with_list_marker(line)));
         let mut word = Some(first);
         let mut around = Around {
             line_start: is_line_start,
@@ -83,6 +85,17 @@ fn ends_with_marker_digits(text: &str) -> bool {
     // the digits start the line when only indentation precedes them
     let indent = stem.trim_end_matches(' ');
     indent.is_empty() || indent.ends_with('\n')
+}
+
+/// Whether the last line of `line` holds only indentation and a list marker,
+/// so the next word opens the item's content.
+fn ends_with_list_marker(line: &str) -> bool {
+    let last = line
+        .rsplit('\n')
+        .next()
+        .unwrap_or(line)
+        .trim_start_matches(' ');
+    matches!(last, "-" | "+" | "*") || is_ordered_list_marker(last)
 }
 
 /// An ordered-list marker like `3.` or `12)` at the beginning of a line would
@@ -698,35 +711,12 @@ pub(super) fn push_code_text(text: &mut String, code_text: &str) {
     text.extend(std::iter::repeat_n('`', fence_len));
 }
 
+/// GFM splits a row before inline parsing and drops one backslash before
+/// every `|`, even inside code spans, so each pipe gets one more backslash.
 pub(super) fn escape_table_cell_inplace(content: &mut String) {
-    if content.is_empty() || !content.contains('|') {
-        return;
+    if content.contains('|') {
+        *content = content.replace('|', "\\|");
     }
-
-    let bytes = content.as_bytes();
-    let mut result = String::with_capacity(content.len() + 4);
-    let mut last = 0;
-
-    for i in 0..bytes.len() {
-        if bytes[i] == b'|' {
-            // Check if '|' is preceded by an unescaped backslash
-            let is_escaped = i > 0 && bytes[i - 1] == b'\\';
-            if !is_escaped {
-                // Append preceding slice and insert escaping backslash
-                result.push_str(&content[last..i]);
-                result.push('\\');
-                // Set 'last' to 'i' so '|' itself will be included in the next chunk slice
-                last = i;
-            }
-        }
-    }
-    // If all pipes were already escaped, avoid extra string assignment
-    if result.is_empty() {
-        return;
-    }
-    // Append the remaining tail of the string
-    result.push_str(&content[last..]);
-    *content = result;
 }
 
 pub(super) const fn linebreak(br: bool) -> &'static str {

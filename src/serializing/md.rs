@@ -1953,10 +1953,34 @@ fn main() {
     }
 
     #[test]
+    fn ours_test_list_item_inline_words_not_line_start() {
+        html_2md_compare(
+            "<ul><li><span><i>e</i> = 2.71</span> and Vol.<span> </span>3. London</li></ul>",
+            "- *e* = 2.71 and Vol. 3. London",
+        );
+        html_2md_compare("<ul><li>1. one</li></ul>", "- 1\\. one");
+        html_2md_compare("<ul><li>= x</li></ul>", "- \\= x");
+    }
+
+    #[test]
     fn ours_test_table_spans_laid_out_on_grid() {
         html_2md_compare(
             "<table><tr><td colspan=\"2\">Wide</td><td rowspan=\"2\">R</td></tr><tr><td>a</td><td>b</td></tr></table>",
             "|   |   |   |\n| - | - | - |\n| Wide |  | R |\n| a | b |  |",
+        );
+    }
+
+    #[test]
+    fn ours_test_table_span_wider_than_any_row_of_cells() {
+        // 4 columns, but no row has more than 2 cells: `y` starts after `b`
+        html_2md_compare(
+            "<table><tr><td colspan=\"3\">x</td><td>y</td></tr><tr><td colspan=\"2\">a</td><td colspan=\"2\">b</td></tr></table>",
+            "|   |   |   |\n| - | - | - |\n| x |  | y |\n| a | b |  |",
+        );
+        // a span to fill the width adds no columns
+        html_2md_compare(
+            "<table><tr><th>A</th><th>B</th></tr><tr><td colspan=\"100\">x</td></tr></table>",
+            "| A | B |\n| - | - |\n| x |  |",
         );
     }
 

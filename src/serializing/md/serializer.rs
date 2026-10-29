@@ -1654,9 +1654,6 @@ fn table_layout<'a>(
         })
         .filter(|(_, cells)| !cells.is_empty())
         .collect();
-    // a cell spans at most as many columns as the widest row has cells:
-    // `colspan="100"` is a way to fill the width
-    let max_columns = rows.iter().map(|(_, cells)| cells.len()).max()?;
     let max_rows = rows.len();
     let mut header = None;
     let mut grid: TableRows = Vec::with_capacity(rows.len());
@@ -1676,7 +1673,7 @@ fn table_layout<'a>(
                 break;
             };
             let below = cell_span(&cell, "rowspan", max_rows) - 1;
-            for i in 0..cell_span(&cell, "colspan", max_columns) {
+            for i in 0..cell_span(&cell, "colspan", MAX_COLSPAN) {
                 let col = line.len();
                 if taken.len() <= col {
                     taken.resize(col + 1, 0);
@@ -1696,11 +1693,27 @@ fn table_layout<'a>(
         }
     }
     let columns = grid.iter().chain(header.iter()).map(Vec::len).max()?;
+    // a column no cell starts in only continues a span, like the ones
+    // `colspan="100"` adds to fill the width, so it holds nothing
+    let mut starts = vec![false; columns];
+    for line in grid.iter().chain(header.iter()) {
+        for (col, cell) in line.iter().enumerate() {
+            starts[col] |= cell.is_some();
+        }
+    }
     for line in grid.iter_mut().chain(header.iter_mut()) {
         line.resize(columns, None);
+        let mut col = 0;
+        line.retain(|_| {
+            col += 1;
+            starts[col - 1]
+        });
     }
     Some((header, grid))
 }
+
+/// The most columns a cell spans, as in HTML.
+const MAX_COLSPAN: usize = 1000;
 
 /// A cell's `colspan` or `rowspan`, from 1 to `max`.
 fn cell_span(cell: &NodeRef, attr: &str, max: usize) -> usize {
