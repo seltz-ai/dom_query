@@ -2,9 +2,9 @@ name: Markdown Serialization Compliance
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "seltz" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "seltz" ]
 
 env:
   CARGO_TERM_COLOR: always
