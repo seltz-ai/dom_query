@@ -33,7 +33,7 @@ pub(super) fn push_normalized_text(text: &mut String, new_text: &str, f_opts: Fo
         let is_line_start = !f_opts.single_line
             && (line.is_empty()
                 || line.ends_with('\n')
-                || (f_opts.list_item && ends_with_list_marker(line)));
+                || (f_opts.list_item && ends_with_item_marker(line)));
         let mut word = Some(first);
         let mut around = Around {
             line_start: is_line_start,
@@ -87,14 +87,10 @@ fn ends_with_marker_digits(text: &str) -> bool {
     indent.is_empty() || indent.ends_with('\n')
 }
 
-/// Whether the last line of `line` holds only indentation and a list marker,
-/// so the next word opens the item's content.
-fn ends_with_list_marker(line: &str) -> bool {
-    let last = line
-        .rsplit('\n')
-        .next()
-        .unwrap_or(line)
-        .trim_start_matches(' ');
+/// Whether the last line of `text` holds only indentation and a list marker,
+/// so what comes next opens the item's content.
+pub(super) fn ends_with_item_marker(text: &str) -> bool {
+    let last = text.rsplit('\n').next().unwrap_or(text).trim();
     matches!(last, "-" | "+" | "*") || is_ordered_list_marker(last)
 }
 
