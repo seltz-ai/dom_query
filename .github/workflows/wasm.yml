@@ -2,9 +2,9 @@ name: wasm ci
 
 on:
   push:
-    branches: [ "main", "feature/*" ]
+    branches: [ "main", "seltz", "feature/*" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "seltz" ]
 
 env:
   CARGO_TERM_COLOR: always
