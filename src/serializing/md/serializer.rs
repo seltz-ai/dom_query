@@ -14,10 +14,10 @@ use super::constants::{
 
 use super::text_utils::{
     add_linebreaks, ends_with_item_marker, escape_closing_hashes, escape_table_cell_inplace,
-    escape_trailing_bang, is_exact_marker_end, is_whitespace_or_punctuation, linebreak,
-    max_backtick_run, move_tail_out, opens_on_punctuation, push_code_text, push_emphasis,
-    push_md_url, push_normalized_text, push_title, remove_emphasis, sanitize_attr_value,
-    trim_trailing_space,
+    escape_trailing_bang, escape_trailing_bracket, is_exact_marker_end,
+    is_whitespace_or_punctuation, linebreak, max_backtick_run, move_tail_out, opens_on_punctuation,
+    push_code_text, push_emphasis, push_md_url, push_normalized_text, push_title, remove_emphasis,
+    sanitize_attr_value, trim_trailing_space,
 };
 
 use super::opts::{EmphasisScope, FormatOpts, ListContext, ListKind};
@@ -343,6 +343,9 @@ impl<'a> MDSerializer<'a> {
             }
             if emphasis_text.starts_with('[') {
                 escape_trailing_bang(text);
+            }
+            if emphasis_text.starts_with(['(', ':']) {
+                escape_trailing_bracket(text);
             }
             let offset = text.len();
             text.push_str(&emphasis_text);
