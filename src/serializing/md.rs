@@ -110,12 +110,12 @@ mod tests {
 
         // `!` is only escaped when it could introduce an image
         html_2md_compare("<p>Wow!</p>", "Wow!");
-        html_2md_compare("<p>not ![an image]</p>", "not \\![an image\\]");
+        html_2md_compare("<p>not ![an image]</p>", "not \\![an image]");
 
         // Characters with Markdown meaning anywhere in the line are escaped.
         html_2md_compare(
             "<p>a *b* c _d_ e`f` [g]</p>",
-            "a \\*b\\* c \\_d\\_ e\\`f\\` [g\\]",
+            "a \\*b\\* c \\_d\\_ e\\`f\\` [g]",
         );
         // `|` only in tables, whose cells escape it so it cannot break a row
         html_2md_compare("<p>a | b</p>", "a | b");
@@ -1897,8 +1897,24 @@ fn main() {
     fn ours_test_emphasis_leading_punctuation_kept_after_space() {
         html_2md_compare(
             "<p><strong>[v1]</strong> and x<strong>[v2]</strong>y</p>",
-            "**[v1\\]** and x[**v2**\\]y",
+            "**[v1]** and x[**v2**]y",
         );
+    }
+
+    #[test]
+    fn ours_test_bracket_escaping() {
+        // brackets that cannot form a link are written as they are
+        html_2md_compare("<p>[email protected]</p>", "[email protected]");
+        html_2md_compare("<p>a […]</p>", "a […]");
+        html_2md_compare("<p>1] and ]</p>", "1] and ]");
+        // a `]` before `(` or `:` would close a link or a definition
+        html_2md_compare("<p>[x](y)</p>", "[x\\](y)");
+        html_2md_compare("<p>[x]: /u</p>", "[x\\]: /u");
+        html_2md_compare("<p><span>[x]</span>(y)</p>", "[x\\](y)");
+        html_2md_compare("<p><b>[x]<b>(y)</b></b></p>", "**[x\\](y)**");
+        html_2md_compare("<p>[x\\]<span>(y)</span></p>", "[x\\\\\\](y)");
+        // a link's text balances its brackets
+        html_2md_compare("<p>[x] <a href=\"u\">[y]</a></p>", "[x] [\\[y\\]](u)");
     }
 
     #[test]

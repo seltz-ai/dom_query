@@ -19,6 +19,9 @@ pub(super) fn push_normalized_text(text: &mut String, new_text: &str, f_opts: Fo
 
     if let Some(first) = iter.next() {
         let escape = !f_opts.skip_escape;
+        if escape && new_text.starts_with(['(', ':']) {
+            escape_trailing_bracket(text);
+        }
         if push_start_whitespace {
             result.push(' ');
         } else if escape && matches!(first, "." | ")") && ends_with_marker_digits(text) {
@@ -117,7 +120,8 @@ pub(super) struct Around {
 }
 
 /// Writes a word, escaping what Markdown would read in it, and only that: an
-/// intraword `_` cannot delimit emphasis, an unpaired `[` makes no link, `<`
+/// intraword `_` cannot delimit emphasis, an unpaired `[` makes no link, `]`
+/// closes one only before `(` or a definition only before `:`, `<`
 /// opens a tag only before a letter, `/`, `!` or `?`, `|` matters only in a
 /// table, whose cells escape it, and a line-start `-`, `+` or `#` only as a
 /// marker of its own.
@@ -143,7 +147,7 @@ pub(super) fn push_escaped_chunk(text: &mut String, chunk: &str, escape: bool, a
         // only for ASCII bytes, which `i + 1` follows on a character boundary
         let next = || chunk[i + 1..].chars().next();
         let escaped = match b {
-            b'\\' | b'`' | b'*' | b'~' | b']' => true,
+            b'\\' | b'`' | b'*' | b'~' => true,
             b'_' => {
                 let prev = chunk[..i].chars().next_back().or(around.prev);
                 let word_char =
@@ -151,6 +155,8 @@ pub(super) fn push_escaped_chunk(text: &mut String, chunk: &str, escape: bool, a
                 !(word_char(prev) && word_char(next()))
             }
             b'[' => around.in_link,
+            // at the chunk's end, a `(` or `:` written next escapes it then
+            b']' => around.in_link || matches!(next(), Some('(' | ':')),
             b'<' => match next() {
                 Some(c) => c.is_ascii_alphabetic() || matches!(c, '/' | '!' | '?'),
                 None => !around.space_after,
@@ -190,6 +196,18 @@ pub(super) fn escape_trailing_bang(text: &mut String) {
     if text.ends_with('!') {
         text.pop();
         text.push_str("\\!");
+    }
+}
+
+/// Escapes a trailing `]` that text wrote, so the `(` or `:` written right
+/// after it cannot close a link or a definition (`[x](u)`, `[x]: u`).
+pub(super) fn escape_trailing_bracket(text: &mut String) {
+    let Some(stem) = text.strip_suffix(']') else {
+        return;
+    };
+    let (end, backslashes) = (stem.len(), stem.len() - stem.trim_end_matches('\\').len());
+    if backslashes % 2 == 0 {
+        text.insert(end, '\\');
     }
 }
 
@@ -766,7 +784,7 @@ mod tests {
         push_normalized_text(&mut text, t, FormatOpts::new());
         assert_eq!(
             text,
-            r"Some text: x \`y\` \*z\* \_w\_ [v\] \<u> #h >q -l +m !i . .5 5. |q|"
+            r"Some text: x \`y\` \*z\* \_w\_ [v] \<u> #h >q -l +m !i . .5 5. |q|"
         );
 
         // at the beginning of a line, block-starting characters are escaped too
